@@ -91,7 +91,7 @@ IMDBTraktSyncer --clear-user-data --clear-cache
 
 ## Alternative Manual Installation Method (without pip install)
 1. Install [Python](https://www.python.org/downloads/) (v3.6 or later). During Python installation, tick the box for adding Python to your PATH variable.  _If Python is already installed, you can skip this step._
-2. Download the latest .zip from the [releases page](https://github.com/RileyXX/IMDB-Trakt-Syncer/releases) and extract it to the desired directory.
+2. Download the latest `.zip` directly from GitHub [here](https://github.com/RileyXX/IMDB-Trakt-Syncer/archive/refs/heads/main.zip) and extract it to the desired directory.
 3. Open your operating systems native command line interface, use it to navigate to the extracted folder and run `python -m pip install requirements.txt`.
 4. Login to [Trakt](https://trakt.tv/oauth/applications) and create a new API application named `IMDBTraktSyncer`. In the "Redirect uri" field, enter `urn:ietf:wg:oauth:2.0:oob`, then save the application.
 5. Run `IMDBTraktSyncer.py` or open the terminal and navigate to the folder where `IMDBTraktSyncer.py` is located. Run `IMDBTraktSyncer.py` in the terminal.
