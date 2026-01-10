@@ -161,7 +161,18 @@ def main():
                     raise PageLoadException(f"Failed to load page. Status code: {status_code}. URL: {url}")
                 
                 # Wait for sign in link to appear and then click it
-                sign_in_link = wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(@class, 'display-button-container')]//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'imdb')]")))
+                sign_in_link = wait.until(
+                    EC.presence_of_element_located(
+                        (
+                            By.XPATH,
+                            "//div[@data-testid='sign_in_content_sign_in']"
+                            "//a[.//span[contains("
+                            "translate(normalize-space(.), "
+                            "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "
+                            "'imdb')]]"
+                        )
+                    )
+                )
                 driver.execute_script("arguments[0].click();", sign_in_link)
                 
                 # wait for email input field and password input field to appear, then enter credentials and submit
@@ -245,7 +256,7 @@ def main():
                 reference_checkbox = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "input[id*='reference-view-toggle']")))
                 driver.execute_script("arguments[0].click();", reference_checkbox)
                 # Submit
-                submit = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".article input[type*='submit']")))
+                submit = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label*='Save']")))
                 driver.execute_script("arguments[0].click();", submit)
                 reference_view_changed = True
                 time.sleep(1)
@@ -1306,7 +1317,7 @@ def main():
                 reference_checkbox = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "input[id*='reference-view-toggle']")))
                 driver.execute_script("arguments[0].click();", reference_checkbox)
                 # Submit
-                submit = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".article input[type*='submit']")))
+                submit = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label*='Save']")))
                 driver.execute_script("arguments[0].click();", submit)
                 time.sleep(1)
             
