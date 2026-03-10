@@ -46,6 +46,7 @@ Setup takes:
 - improved Trakt API handling for larger libraries
 - safer IMDb export detection and CSV parsing
 - more stable Windows console output during long runs
+- resumable sync checkpoints so interrupted runs can continue instead of restarting from zero
 - cleaner onboarding and documentation
 
 ## Fork comparison
@@ -88,6 +89,7 @@ Notes:
 - Shows, movies, and episodes are supported.
 - Existing items are usually preserved instead of overwritten.
 - Some IMDb actions rely on browser automation because IMDb does not provide a public write API for this workflow.
+- Long-running sync phases now save checkpoint progress so crashes or cancelled runs can resume later.
 
 ## Requirements
 
@@ -183,9 +185,22 @@ The sync flow is roughly:
 6. Parse both sides into comparable datasets
 7. Resolve outdated or redirected IMDb IDs when needed
 8. Compare differences and build action lists
-9. Apply only the missing changes to each side
+9. Save progress checkpoints during long sync phases
+10. Apply only the missing changes to each side, resuming from saved checkpoints if needed
 
 This approach makes the sync safer than a naive full overwrite.
+
+## Resume after interruption
+
+This fork includes resumable sync checkpoints for long runs.
+
+If the app is cancelled, closed, or crashes during a large sync:
+
+- completed items are remembered in `IMDBTraktSyncer/sync_checkpoint.json`
+- the next run skips work that already finished in supported phases
+- a fully successful run clears the checkpoint file automatically
+
+This is especially useful for very large watch history libraries where a full run can take a long time.
 
 ## First-run behavior
 
@@ -308,8 +323,12 @@ Then inspect `log.txt` in that directory.
 Recent improvements in this fork include:
 
 - better Trakt token recovery
+- proactive Trakt token refresh before expiry-related failures
 - paginated Trakt reads so large accounts are loaded more completely
+- batched Trakt write requests to reduce API chatter and speed up syncs
 - more resilient IMDb export detection and parsing
+- cached Trakt lookups for IMDb review media types
+- resumable sync checkpoints for interrupted long-running jobs
 - safer console output on Windows terminals
 - fewer false-positive error logs for normal empty-list situations
 

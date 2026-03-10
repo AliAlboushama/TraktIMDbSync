@@ -13,7 +13,7 @@ import os
 import inspect
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from selenium.common.exceptions import WebDriverException, TimeoutException
 import sys
 from pathlib import Path
@@ -56,6 +56,22 @@ def is_trakt_success(response):
     return response is not None and response.status_code in TRAKT_SUCCESS_CODES
 
 
+def _should_refresh_trakt_token(credentials):
+    expiration_value = credentials.get("trakt_token_expires")
+    if not expiration_value or expiration_value == "empty":
+        return True
+
+    try:
+        expiration_time = datetime.fromisoformat(expiration_value)
+    except ValueError:
+        return True
+
+    if expiration_time.tzinfo is None:
+        expiration_time = expiration_time.replace(tzinfo=timezone.utc)
+
+    return datetime.now(timezone.utc) >= expiration_time
+
+
 def _load_trakt_auth_headers():
     credentials = VC.load_credentials()
     trakt_client_id = credentials.get("trakt_client_id")
@@ -67,6 +83,11 @@ def _load_trakt_auth_headers():
         or not trakt_access_token
         or trakt_access_token == "empty"
     ):
+        trakt_client_id, _, trakt_access_token, _, _, _ = VC.prompt_get_credentials()
+    elif _should_refresh_trakt_token(credentials):
+        refreshed_headers = refresh_trakt_access_token()
+        if refreshed_headers:
+            return refreshed_headers
         trakt_client_id, _, trakt_access_token, _, _, _ = VC.prompt_get_credentials()
 
     return {
@@ -110,6 +131,17 @@ def refresh_trakt_access_token():
         "trakt-api-key": client_id,
         "Authorization": f"Bearer {access_token}",
     }
+
+
+def _safe_retry_after_seconds(response, fallback_delay):
+    retry_after = response.headers.get("Retry-After")
+    if retry_after is None:
+        return fallback_delay
+
+    try:
+        return max(1, int(float(retry_after)))
+    except (TypeError, ValueError):
+        return fallback_delay
 
 
 def build_trakt_sync_payload(items, include_rating=False, include_watched_at=False):
@@ -221,7 +253,7 @@ def make_trakt_request(url, headers=None, params=None, payload=None, max_retries
                     retry_attempts += 1  # Increment retry counter
 
                     # Respect the 'Retry-After' header if provided, otherwise use default delay
-                    retry_after = int(response.headers.get("Retry-After", retry_delay))
+                    retry_after = _safe_retry_after_seconds(response, retry_delay)
                     if response.status_code != 429:
                         remaining_time = sum(
                             1 * (2**i) for i in range(retry_attempts, max_retries)
@@ -326,45 +358,37 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
     status_code = None
 
     while total_time_spent < total_wait_time:
+        start_time = time.time()
         try:
-            start_time = time.time()  # Track time taken for each retry attempt
-
-            # Temporary solution to Chromium bug: Restart tab logic. See: https://issues.chromium.org/issues/386887881
-            # Open a new tab and close any extras from previous iterations
-            driver.execute_script("window.open();")
-            new_tab = driver.window_handles[-1]
-            driver.switch_to.window(new_tab)
-
-            # Close all other tabs except the current new tab
-            for handle in driver.window_handles[:-1]:
-                driver.switch_to.window(handle)
-                driver.close()
-            driver.switch_to.window(new_tab)
-
-            # Attempt to load the page using Selenium driver
             driver.get(url)
 
-            # Wait until the status code becomes available
             wait.until(
-                lambda driver: driver.execute_script(
-                    "return window.performance.getEntries().length > 0 && window.performance.getEntries()[0].responseStatus !== undefined"
+                lambda web_driver: web_driver.execute_script(
+                    "return document.readyState"
                 )
+                == "complete"
             )
 
-            # Get the HTTP status code of the page using JavaScript
             status_code = driver.execute_script(
-                "return window.performance.getEntries()[0].responseStatus;"
+                """
+                const navEntries = performance.getEntriesByType('navigation');
+                if (navEntries.length && navEntries[0].responseStatus !== undefined) {
+                    return navEntries[0].responseStatus;
+                }
+                const entries = performance.getEntries();
+                if (entries.length && entries[0].responseStatus !== undefined) {
+                    return entries[0].responseStatus;
+                }
+                return 200;
+                """
             )
-
-            # Update resolved_url with the current URL after potential redirects
             resolved_url = driver.current_url
 
-            # Handle status codes
             if status_code is None or status_code == 0:
                 print(
                     f"   - Unable to determine page load status. Status code returned 0 or None. Retrying..."
                 )
-                elapsed_time = time.time() - start_time  # Time taken for this attempt
+                elapsed_time = time.time() - start_time
                 total_time_spent += elapsed_time
 
                 if total_time_spent >= total_wait_time:
@@ -390,16 +414,10 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
                 return False, status_code, url, driver, wait
 
             else:
-                # Page loaded successfully
                 return True, status_code, resolved_url, driver, wait
 
         except TimeoutException as e:
-            frame = inspect.currentframe()
-            lineno = frame.f_lineno
-            filename = os.path.basename(inspect.getfile(frame))
-            print(
-                f"   - TimeoutException: {str(e).splitlines()[0]} URL: {url} (File: {filename}, Line: {lineno})"
-            )
+            print(f"   - TimeoutException: {str(e).splitlines()[0]} URL: {url}")
 
             elapsed_time = time.time() - start_time
             total_time_spent += elapsed_time
@@ -414,12 +432,7 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
             continue
 
         except WebDriverException as e:
-            frame = inspect.currentframe()
-            lineno = frame.f_lineno
-            filename = os.path.basename(inspect.getfile(frame))
-            print(
-                f"   - Selenium WebDriver Error: {str(e).splitlines()[0]} URL: {url} (File: {filename}, Line: {lineno})"
-            )
+            print(f"   - Selenium WebDriver Error: {str(e).splitlines()[0]} URL: {url}")
 
             retryable_errors = [
                 "net::ERR_NAME_NOT_RESOLVED",
@@ -457,12 +470,7 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
                 return False, None, url, driver, wait
 
         except PageLoadException as e:
-            frame = inspect.currentframe()
-            lineno = frame.f_lineno
-            filename = os.path.basename(inspect.getfile(frame))
-            print(
-                f"   - PageLoadException: {str(e).splitlines()[0]} URL: {url} (File: {filename}, Line: {lineno})"
-            )
+            print(f"   - PageLoadException: {str(e).splitlines()[0]} URL: {url}")
 
             elapsed_time = time.time() - start_time
             total_time_spent += elapsed_time

@@ -7,16 +7,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from IMDBTraktSyncer import errorHandling as EH
 from IMDBTraktSyncer import errorLogger as EL
+from IMDBTraktSyncer import verifyCredentials as VC
 
 
-def _parse_json_response(response):
+class TraktFetchError(RuntimeError):
+    pass
+
+
+def _parse_json_response(response, endpoint):
     if not EH.is_trakt_success(response):
-        return []
+        status_code = response.status_code if response is not None else "no response"
+        raise TraktFetchError(
+            f"Failed to load Trakt data from {endpoint}. Status: {status_code}"
+        )
     try:
         return json.loads(response.text)
     except json.JSONDecodeError:
         EL.logger.error("Failed to decode Trakt API response.", exc_info=True)
-        return []
+        raise TraktFetchError(f"Invalid JSON returned from Trakt endpoint {endpoint}")
 
 
 def _get_page_count(response):
@@ -35,14 +43,14 @@ def _fetch_paginated(endpoint, params=None, sort=None, limit=100):
         combined_params["sort"] = sort
 
     response = EH.make_trakt_request(endpoint, params={**combined_params, "page": 1})
-    items = _parse_json_response(response)
+    items = _parse_json_response(response, endpoint)
     total_pages = _get_page_count(response)
 
     for page in range(2, total_pages + 1):
         page_response = EH.make_trakt_request(
             endpoint, params={**combined_params, "page": page}
         )
-        items.extend(_parse_json_response(page_response))
+        items.extend(_parse_json_response(page_response, f"{endpoint}?page={page}"))
 
     return items
 
@@ -53,14 +61,16 @@ def remove_slashes(string):
 
 
 def get_trakt_encoded_username():
-    # Process Trakt Ratings and Comments
+    credentials = VC.load_credentials()
+    saved_slug = credentials.get("trakt_username_slug")
+    if saved_slug and saved_slug != "empty":
+        return urllib.parse.quote(saved_slug)
+
     response = EH.make_trakt_request("https://api.trakt.tv/users/me")
-    json_data = _parse_json_response(response)
-    if not json_data:
-        raise RuntimeError(
-            "Unable to load the Trakt profile for the authenticated user."
-        )
+    json_data = _parse_json_response(response, "https://api.trakt.tv/users/me")
     username_slug = json_data["ids"]["slug"]
+    credentials["trakt_username_slug"] = username_slug
+    VC.save_credentials(credentials)
     encoded_username = urllib.parse.quote(username_slug)
     return encoded_username
 

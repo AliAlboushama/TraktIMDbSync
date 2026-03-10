@@ -3,6 +3,7 @@ import time
 import sys
 import argparse
 import subprocess
+import builtins
 from datetime import datetime, timezone
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -20,6 +21,43 @@ from IMDBTraktSyncer import arguments
 
 class PageLoadException(Exception):
     pass
+
+
+def safe_print(*args, **kwargs):
+    try:
+        builtins.print(*args, **kwargs)
+    except UnicodeEncodeError:
+        sep = kwargs.get("sep", " ")
+        end = kwargs.get("end", "\n")
+        text = sep.join(str(arg) for arg in args)
+        fallback = text.encode("ascii", errors="replace").decode("ascii")
+        builtins.print(fallback, end=end, flush=kwargs.get("flush", False))
+
+
+print = safe_print
+
+
+def format_episode_prefix(item):
+    season_number = item.get("SeasonNumber")
+    episode_number = item.get("EpisodeNumber")
+    if season_number and episode_number:
+        return f"[S{str(season_number).zfill(2)}E{str(episode_number).zfill(2)}] "
+    return ""
+
+
+def format_year_suffix(item):
+    return f" ({item['Year']})" if item.get("Year") is not None else ""
+
+
+def prepare_resume_items(checkpoint_manager, phase_name, items, label):
+    pending_items, completed_count = checkpoint_manager.get_pending_items(
+        phase_name, items
+    )
+    if completed_count:
+        print(
+            f"Resuming {label}: skipping {completed_count} already completed item(s)."
+        )
+    return pending_items
 
 
 def main():
@@ -87,6 +125,7 @@ def main():
         from IMDBTraktSyncer import errorHandling as EH
         from IMDBTraktSyncer import errorLogger as EL
         from IMDBTraktSyncer.authTrakt import TraktAuthenticationError
+        from IMDBTraktSyncer.syncCheckpoint import SyncCheckpointManager
 
         # Check if package is up to date
         CV.checkVersion()
@@ -116,6 +155,8 @@ def main():
 
             # Set up directory for downloads
             directory = os.path.dirname(os.path.realpath(__file__))
+            download_directory = imdbData.get_imdb_download_directory(directory)
+            checkpoint_manager = SyncCheckpointManager(directory)
 
             # Start WebDriver
             print("Starting WebDriver...")
@@ -136,7 +177,8 @@ def main():
             options.add_experimental_option(
                 "prefs",
                 {
-                    "download.default_directory": directory,
+                    "download.default_directory": download_directory,
+                    "savefile.default_directory": download_directory,
                     "download.directory_upgrade": True,
                     "download.prompt_for_download": False,
                     "profile.default_content_setting_values.automatic_downloads": 1,
@@ -423,7 +465,7 @@ def main():
             driver, wait = imdbData.generate_imdb_exports(
                 driver,
                 wait,
-                directory,
+                download_directory,
                 sync_watchlist_value,
                 sync_ratings_value,
                 sync_watch_history_value,
@@ -433,7 +475,7 @@ def main():
             driver, wait = imdbData.download_imdb_exports(
                 driver,
                 wait,
-                directory,
+                download_directory,
                 sync_watchlist_value,
                 sync_ratings_value,
                 sync_watch_history_value,
@@ -442,15 +484,15 @@ def main():
             )
             if sync_watchlist_value or remove_watched_from_watchlists_value:
                 imdb_watchlist, imdb_watchlist_size, driver, wait = (
-                    imdbData.get_imdb_watchlist(driver, wait, directory)
+                    imdbData.get_imdb_watchlist(driver, wait, download_directory)
                 )
             if sync_ratings_value or mark_rated_as_watched_value:
                 imdb_ratings, driver, wait = imdbData.get_imdb_ratings(
-                    driver, wait, directory
+                    driver, wait, download_directory
                 )
             if sync_reviews_value:
                 imdb_reviews, errors_found_getting_imdb_reviews, driver, wait = (
-                    imdbData.get_imdb_reviews(driver, wait, directory)
+                    imdbData.get_imdb_reviews(driver, wait, download_directory)
                 )
             if (
                 sync_watch_history_value
@@ -458,7 +500,7 @@ def main():
                 or mark_rated_as_watched_value
             ):
                 imdb_watch_history, imdb_watch_history_size, driver, wait = (
-                    imdbData.get_imdb_checkins(driver, wait, directory)
+                    imdbData.get_imdb_checkins(driver, wait, download_directory)
                 )
             print("Processing IMDB Data Complete")
 
@@ -753,58 +795,57 @@ def main():
             if sync_watchlist_value:
                 # Set Trakt Watchlist Items
                 if trakt_watchlist_to_set:
+                    trakt_watchlist_to_set = prepare_resume_items(
+                        checkpoint_manager,
+                        "trakt_watchlist_add",
+                        trakt_watchlist_to_set,
+                        "Trakt watchlist sync",
+                    )
+
+                if trakt_watchlist_to_set:
                     print("Setting Trakt Watchlist Items")
 
                     # Count the total number of items
                     num_items = len(trakt_watchlist_to_set)
                     item_count = 0
 
-                    for item in trakt_watchlist_to_set:
-                        item_count += 1
+                    batch_results = EH.sync_trakt_items_in_batches(
+                        "https://api.trakt.tv/sync/watchlist", trakt_watchlist_to_set
+                    )
 
-                        imdb_id = item["IMDB_ID"]
-                        media_type = item["Type"]  # 'movie', 'show', or 'episode'
+                    for batch, response in batch_results:
+                        if response and response.status_code in [200, 201, 204]:
+                            checkpoint_manager.mark_items_completed(
+                                "trakt_watchlist_add", batch
+                            )
 
-                        url = f"https://api.trakt.tv/sync/watchlist"
-
-                        data = {"movies": [], "shows": [], "episodes": []}
-
-                        if media_type == "movie":
-                            data["movies"].append({"ids": {"imdb": imdb_id}})
-                        elif media_type == "show":
-                            data["shows"].append({"ids": {"imdb": imdb_id}})
-                        elif media_type == "episode":
-                            data["episodes"].append({"ids": {"imdb": imdb_id}})
-                        else:
-                            data = None
-
-                        if data:
-                            response = EH.make_trakt_request(url, payload=data)
-
-                            season_number = item.get("SeasonNumber")
-                            episode_number = item.get("EpisodeNumber")
-                            if season_number and episode_number:
-                                season_number = str(season_number).zfill(2)
-                                episode_number = str(episode_number).zfill(2)
-                                episode_title = f"[S{season_number}E{episode_number}] "
-                            else:
-                                episode_title = ""
+                        for item in batch:
+                            item_count += 1
+                            episode_title = format_episode_prefix(item)
 
                             if response and response.status_code in [200, 201, 204]:
                                 print(
                                     f" - Added {item['Type']} ({item_count} of {num_items}): {episode_title}{item['Title']} ({item['Year']}) to Trakt Watchlist ({item['IMDB_ID']})"
                                 )
-
                             else:
                                 error_message = f"Failed to add {item['Type']} ({item_count} of {num_items}): {episode_title}{item['Title']} ({item['Year']}) to Trakt Watchlist ({item['IMDB_ID']})"
                                 print(f"   - {error_message}")
                                 EL.logger.error(error_message)
 
+                    checkpoint_manager.complete_phase("trakt_watchlist_add")
                     print("Setting Trakt Watchlist Items Complete")
                 else:
                     print("No Trakt Watchlist Items To Set")
 
                 # Set IMDB Watchlist Items
+                if imdb_watchlist_to_set:
+                    imdb_watchlist_to_set = prepare_resume_items(
+                        checkpoint_manager,
+                        "imdb_watchlist_add",
+                        imdb_watchlist_to_set,
+                        "IMDb watchlist sync",
+                    )
+
                 if imdb_watchlist_to_set:
                     print("Setting IMDB Watchlist Items")
 
@@ -813,18 +854,8 @@ def main():
                     item_count = 0
 
                     for item in imdb_watchlist_to_set:
-                        season_number = item.get("SeasonNumber")
-                        episode_number = item.get("EpisodeNumber")
-                        if season_number and episode_number:
-                            season_number = str(season_number).zfill(2)
-                            episode_number = str(episode_number).zfill(2)
-                            episode_title = f"[S{season_number}E{episode_number}] "
-                        else:
-                            episode_title = ""
-
-                        year_str = (
-                            f" ({item['Year']})" if item["Year"] is not None else ""
-                        )  # sometimes year is None for episodes from trakt so remove it from the print string
+                        episode_title = format_episode_prefix(item)
+                        year_str = format_year_suffix(item)
                         try:
                             item_count += 1
 
@@ -903,6 +934,9 @@ def main():
                                             print(
                                                 f" - Added {item['Type']} ({item_count} of {num_items}): {episode_title}{item['Title']}{year_str} to IMDB Watchlist ({item['IMDB_ID']})"
                                             )
+                                            checkpoint_manager.mark_item_completed(
+                                                "imdb_watchlist_add", item
+                                            )
 
                                             break  # Break the loop if successful
                                         except TimeoutException:
@@ -917,6 +951,9 @@ def main():
                                     error_message2 = f"   - {item['Type'].capitalize()} already exists in IMDB watchlist."
                                     EL.logger.info(error_message1)
                                     EL.logger.info(error_message2)
+                                    checkpoint_manager.mark_item_completed(
+                                        "imdb_watchlist_add", item
+                                    )
                             else:
                                 # Handle the case when the URL contains "/reference"
 
@@ -941,6 +978,9 @@ def main():
                                     driver.execute_script(
                                         "arguments[0].click();", watchlist_button
                                     )
+                                    checkpoint_manager.mark_item_completed(
+                                        "imdb_watchlist_add", item
+                                    )
 
                         except (
                             NoSuchElementException,
@@ -952,6 +992,7 @@ def main():
                             EL.logger.error(error_message, exc_info=True)
                             pass
 
+                    checkpoint_manager.complete_phase("imdb_watchlist_add")
                     print("Setting IMDB Watchlist Items Complete")
                 else:
                     print("No IMDB Watchlist Items To Set")
@@ -960,63 +1001,35 @@ def main():
             if sync_ratings_value:
                 # Set Trakt Ratings
                 if trakt_ratings_to_set:
-                    print("Setting Trakt Ratings")
+                    trakt_ratings_to_set = prepare_resume_items(
+                        checkpoint_manager,
+                        "trakt_ratings_add",
+                        trakt_ratings_to_set,
+                        "Trakt ratings sync",
+                    )
 
-                    # Set the API endpoints
-                    rate_url = "https://api.trakt.tv/sync/ratings"
+                if trakt_ratings_to_set:
+                    print("Setting Trakt Ratings")
 
                     # Count the total number of items
                     num_items = len(trakt_ratings_to_set)
                     item_count = 0
 
-                    # Loop through your data table and rate each item on Trakt
-                    for item in trakt_ratings_to_set:
-                        item_count += 1
-                        if item["Type"] == "show":
-                            # This is a TV show
-                            data = {
-                                "shows": [
-                                    {
-                                        "ids": {"imdb": item["IMDB_ID"]},
-                                        "rating": item["Rating"],
-                                    }
-                                ]
-                            }
-                        elif item["Type"] == "movie":
-                            # This is a movie
-                            data = {
-                                "movies": [
-                                    {
-                                        "ids": {"imdb": item["IMDB_ID"]},
-                                        "rating": item["Rating"],
-                                    }
-                                ]
-                            }
-                        elif item["Type"] == "episode":
-                            # This is an episode
-                            data = {
-                                "episodes": [
-                                    {
-                                        "ids": {"imdb": item["IMDB_ID"]},
-                                        "rating": item["Rating"],
-                                    }
-                                ]
-                            }
-                        else:
-                            data = None
+                    batch_results = EH.sync_trakt_items_in_batches(
+                        "https://api.trakt.tv/sync/ratings",
+                        trakt_ratings_to_set,
+                        include_rating=True,
+                    )
 
-                        if data:
-                            # Make the API call to rate the item
-                            response = EH.make_trakt_request(rate_url, payload=data)
+                    for batch, response in batch_results:
+                        if response and response.status_code in [200, 201, 204]:
+                            checkpoint_manager.mark_items_completed(
+                                "trakt_ratings_add", batch
+                            )
 
-                            season_number = item.get("SeasonNumber")
-                            episode_number = item.get("EpisodeNumber")
-                            if season_number and episode_number:
-                                season_number = str(season_number).zfill(2)
-                                episode_number = str(episode_number).zfill(2)
-                                episode_title = f"[S{season_number}E{episode_number}] "
-                            else:
-                                episode_title = ""
+                        for item in batch:
+                            item_count += 1
+                            episode_title = format_episode_prefix(item)
 
                             if response and response.status_code in [200, 201, 204]:
                                 print(
@@ -1027,28 +1040,27 @@ def main():
                                 print(f"   - {error_message}")
                                 EL.logger.error(error_message)
 
+                    checkpoint_manager.complete_phase("trakt_ratings_add")
                     print("Setting Trakt Ratings Complete")
                 else:
                     print("No Trakt Ratings To Set")
 
                 # Set IMDB Ratings
                 if imdb_ratings_to_set:
+                    imdb_ratings_to_set = prepare_resume_items(
+                        checkpoint_manager,
+                        "imdb_ratings_add",
+                        imdb_ratings_to_set,
+                        "IMDb ratings sync",
+                    )
+
+                if imdb_ratings_to_set:
                     print("Setting IMDB Ratings")
 
                     # loop through each movie and TV show rating and submit rating on IMDB website
                     for i, item in enumerate(imdb_ratings_to_set, 1):
-                        season_number = item.get("SeasonNumber")
-                        episode_number = item.get("EpisodeNumber")
-                        if season_number and episode_number:
-                            season_number = str(season_number).zfill(2)
-                            episode_number = str(episode_number).zfill(2)
-                            episode_title = f"[S{season_number}E{episode_number}] "
-                        else:
-                            episode_title = ""
-
-                        year_str = (
-                            f" ({item['Year']})" if item["Year"] is not None else ""
-                        )  # sometimes year is None for episodes from trakt so remove it from the print string
+                        episode_title = format_episode_prefix(item)
+                        year_str = format_year_suffix(item)
 
                         try:
                             # Load page
@@ -1156,11 +1168,17 @@ def main():
                                     print(
                                         f" - Rated {item['Type']}: ({i} of {len(imdb_ratings_to_set)}) {episode_title}{item['Title']}{year_str}: {item['Rating']}/10 on IMDB ({item['IMDB_ID']})"
                                     )
+                                    checkpoint_manager.mark_item_completed(
+                                        "imdb_ratings_add", item
+                                    )
 
                                 else:
                                     error_message1 = f" - Rating already exists on IMDB for this {item['Type']}: ({i} of {len(imdb_ratings_to_set)}) {episode_title}{item['Title']}{year_str}: {item['Rating']}/10 on IMDB ({item['IMDB_ID']})"
                                     print(error_message1)
                                     EL.logger.info(error_message1)
+                                    checkpoint_manager.mark_item_completed(
+                                        "imdb_ratings_add", item
+                                    )
                             else:
                                 # Handle the case when the URL contains "/reference"
 
@@ -1202,6 +1220,9 @@ def main():
                                 )
 
                                 time.sleep(1)
+                                checkpoint_manager.mark_item_completed(
+                                    "imdb_ratings_add", item
+                                )
 
                         except (
                             NoSuchElementException,
@@ -1213,6 +1234,7 @@ def main():
                             EL.logger.error(error_message, exc_info=True)
                             pass
 
+                    checkpoint_manager.complete_phase("imdb_ratings_add")
                     print("Setting IMDB Ratings Complete")
                 else:
                     print("No IMDB Ratings To Set")
@@ -1222,6 +1244,14 @@ def main():
                 # Check if there was an error getting IMDB reviews
                 if not errors_found_getting_imdb_reviews:
                     # Set Trakt Reviews
+                    if trakt_reviews_to_set:
+                        trakt_reviews_to_set = prepare_resume_items(
+                            checkpoint_manager,
+                            "trakt_reviews_add",
+                            trakt_reviews_to_set,
+                            "Trakt review sync",
+                        )
+
                     if trakt_reviews_to_set:
                         print("Setting Trakt Reviews")
 
@@ -1245,7 +1275,7 @@ def main():
                             elif media_type == "show":
                                 data["show"] = {"ids": {"imdb": imdb_id}}
                             elif media_type == "episode":
-                                data["episode"] = {"ids": {"imdb": episode_id}}
+                                data["episode"] = {"ids": {"imdb": imdb_id}}
                             else:
                                 data = None
 
@@ -1264,6 +1294,9 @@ def main():
                                     episode_title = ""
 
                                 if response and response.status_code in [200, 201, 204]:
+                                    checkpoint_manager.mark_item_completed(
+                                        "trakt_reviews_add", item
+                                    )
                                     print(
                                         f" - Submitted comment ({item_count} of {num_items}): {episode_title}{item['Title']} ({item['Year']}) on Trakt ({item['IMDB_ID']})"
                                     )
@@ -1272,11 +1305,20 @@ def main():
                                     print(f"   - {error_message}")
                                     EL.logger.error(error_message)
 
+                        checkpoint_manager.complete_phase("trakt_reviews_add")
                         print("Trakt Reviews Set Successfully")
                     else:
                         print("No Trakt Reviews To Set")
 
                     # Set IMDB Reviews
+                    if imdb_reviews_to_set:
+                        imdb_reviews_to_set = prepare_resume_items(
+                            checkpoint_manager,
+                            "imdb_reviews_add",
+                            imdb_reviews_to_set,
+                            "IMDb review sync",
+                        )
+
                     if imdb_reviews_to_set:
                         # Call the check_last_run() function
                         if VC.check_imdb_reviews_last_submitted():
@@ -1343,6 +1385,9 @@ def main():
                                         print(
                                             f"   - Skipped setting review for {item['Title']} ({item['Year']}) on IMDB ({item['IMDB_ID']}) — a review already exists for this item"
                                         )
+                                        checkpoint_manager.mark_item_completed(
+                                            "imdb_reviews_add", item
+                                        )
                                         continue
 
                                     # Clear old review inputs if review already exists
@@ -1400,6 +1445,9 @@ def main():
                                     print(
                                         f" - Submitted review ({item_count} of {num_items}): {episode_title}{item['Title']} ({item['Year']}) on IMDB ({item['IMDB_ID']})"
                                     )
+                                    checkpoint_manager.mark_item_completed(
+                                        "imdb_reviews_add", item
+                                    )
 
                                 except (
                                     NoSuchElementException,
@@ -1411,6 +1459,7 @@ def main():
                                     EL.logger.error(error_message, exc_info=True)
                                     pass
 
+                            checkpoint_manager.complete_phase("imdb_reviews_add")
                             print("Setting IMDB Reviews Complete")
                         else:
                             print(
@@ -1430,42 +1479,34 @@ def main():
             ):
                 # Remove Watched Items Trakt Watchlist
                 if trakt_watchlist_items_to_remove:
-                    print("Removing Watched Items From Trakt Watchlist")
+                    trakt_watchlist_items_to_remove = prepare_resume_items(
+                        checkpoint_manager,
+                        "trakt_watchlist_remove",
+                        trakt_watchlist_items_to_remove,
+                        "Trakt watchlist removal",
+                    )
 
-                    # Set the API endpoint
-                    remove_url = "https://api.trakt.tv/sync/watchlist/remove"
+                if trakt_watchlist_items_to_remove:
+                    print("Removing Watched Items From Trakt Watchlist")
 
                     # Count the total number of items
                     num_items = len(trakt_watchlist_items_to_remove)
                     item_count = 0
 
-                    # Loop through the items to remove from the watchlist
-                    for item in trakt_watchlist_items_to_remove:
-                        item_count += 1
-                        if item["Type"] == "show":
-                            # This is a TV show
-                            data = {"shows": [{"ids": {"imdb": item["IMDB_ID"]}}]}
-                        elif item["Type"] == "movie":
-                            # This is a movie
-                            data = {"movies": [{"ids": {"imdb": item["IMDB_ID"]}}]}
-                        elif item["Type"] == "episode":
-                            # This is an episode
-                            data = {"episodes": [{"ids": {"imdb": item["IMDB_ID"]}}]}
-                        else:
-                            data = None
+                    batch_results = EH.sync_trakt_items_in_batches(
+                        "https://api.trakt.tv/sync/watchlist/remove",
+                        trakt_watchlist_items_to_remove,
+                    )
 
-                        if data:
-                            # Make the API call to remove the item from the watchlist
-                            response = EH.make_trakt_request(remove_url, payload=data)
+                    for batch, response in batch_results:
+                        if response and response.status_code in [200, 201, 204]:
+                            checkpoint_manager.mark_items_completed(
+                                "trakt_watchlist_remove", batch
+                            )
 
-                            season_number = item.get("SeasonNumber")
-                            episode_number = item.get("EpisodeNumber")
-                            if season_number and episode_number:
-                                season_number = str(season_number).zfill(2)
-                                episode_number = str(episode_number).zfill(2)
-                                episode_title = f"[S{season_number}E{episode_number}] "
-                            else:
-                                episode_title = ""
+                        for item in batch:
+                            item_count += 1
+                            episode_title = format_episode_prefix(item)
 
                             if response and response.status_code in [200, 201, 204]:
                                 print(
@@ -1476,11 +1517,20 @@ def main():
                                 print(f"   - {error_message}")
                                 EL.logger.error(error_message)
 
+                    checkpoint_manager.complete_phase("trakt_watchlist_remove")
                     print("Removing Watched Items From Trakt Watchlist Complete")
                 else:
                     print("No Trakt Watchlist Items To Remove")
 
                 # Remove Watched Items IMDB Watchlist
+                if imdb_watchlist_items_to_remove:
+                    imdb_watchlist_items_to_remove = prepare_resume_items(
+                        checkpoint_manager,
+                        "imdb_watchlist_remove",
+                        imdb_watchlist_items_to_remove,
+                        "IMDb watchlist removal",
+                    )
+
                 if imdb_watchlist_items_to_remove:
                     print("Removing Watched Items From IMDB Watchlist")
 
@@ -1489,18 +1539,8 @@ def main():
                     item_count = 0
 
                     for item in imdb_watchlist_items_to_remove:
-                        season_number = item.get("SeasonNumber")
-                        episode_number = item.get("EpisodeNumber")
-                        if season_number and episode_number:
-                            season_number = str(season_number).zfill(2)
-                            episode_number = str(episode_number).zfill(2)
-                            episode_title = f"[S{season_number}E{episode_number}] "
-                        else:
-                            episode_title = ""
-
-                        year_str = (
-                            f" ({item['Year']})" if item["Year"] is not None else ""
-                        )  # sometimes year is None for episodes from trakt so remove it from the print string
+                        episode_title = format_episode_prefix(item)
+                        year_str = format_year_suffix(item)
 
                         try:
                             item_count += 1
@@ -1580,6 +1620,9 @@ def main():
                                             print(
                                                 f" - Removed {item['Type']} ({item_count} of {num_items}): {episode_title}{item['Title']}{year_str} from IMDB Watchlist ({item['IMDB_ID']})"
                                             )
+                                            checkpoint_manager.mark_item_completed(
+                                                "imdb_watchlist_remove", item
+                                            )
 
                                             break  # Break the loop if successful
                                         except TimeoutException:
@@ -1595,6 +1638,9 @@ def main():
                                     error_message2 = f"   - {item['Type'].capitalize()} not in IMDB watchlist."
                                     EL.logger.error(error_message1)
                                     EL.logger.error(error_message2)
+                                    checkpoint_manager.mark_item_completed(
+                                        "imdb_watchlist_remove", item
+                                    )
 
                             else:
                                 # Handle the case when the URL contains "/reference"
@@ -1620,6 +1666,9 @@ def main():
                                     driver.execute_script(
                                         "arguments[0].click();", watchlist_button
                                     )
+                                    checkpoint_manager.mark_item_completed(
+                                        "imdb_watchlist_remove", item
+                                    )
 
                         except (
                             NoSuchElementException,
@@ -1631,6 +1680,7 @@ def main():
                             EL.logger.error(error_message, exc_info=True)
                             pass
 
+                    checkpoint_manager.complete_phase("imdb_watchlist_remove")
                     print("Removing Watched Items From IMDB Watchlist Complete")
                 else:
                     print("No IMDB Watchlist Items To Remove")
@@ -1639,96 +1689,59 @@ def main():
             if sync_watch_history_value or mark_rated_as_watched_value:
                 # Set Trakt Watch History
                 if trakt_watch_history_to_set:
-                    print("Setting Trakt Watch History")
+                    trakt_watch_history_to_set = prepare_resume_items(
+                        checkpoint_manager,
+                        "trakt_watch_history_add",
+                        trakt_watch_history_to_set,
+                        "Trakt watch history sync",
+                    )
 
-                    # Set the API endpoint for syncing watch history
-                    watch_history_url = "https://api.trakt.tv/sync/history"
+                if trakt_watch_history_to_set:
+                    print("Setting Trakt Watch History")
 
                     # Count the total number of items
                     num_items = len(trakt_watch_history_to_set)
                     item_count = 0
 
-                    # Loop through your data table and set watch history for each item
-                    for item in trakt_watch_history_to_set:
-                        item_count += 1
+                    batch_results = EH.sync_trakt_items_in_batches(
+                        "https://api.trakt.tv/sync/history",
+                        trakt_watch_history_to_set,
+                        include_watched_at=True,
+                    )
 
-                        # Initialize the data variable for the current item
-                        data = None
-
-                        if item["Type"] == "movie":
-                            # This is a movie
-                            data = {
-                                "movies": [
-                                    {
-                                        "ids": {"imdb": item["IMDB_ID"]},
-                                        "watched_at": item[
-                                            "WatchedAt"
-                                        ],  # Mark when the movie was watched
-                                    }
-                                ]
-                            }
-
-                        elif item["Type"] == "episode":
-                            # This is an episode
-                            data = {
-                                "episodes": [
-                                    {
-                                        "ids": {"imdb": item["IMDB_ID"]},
-                                        "watched_at": item[
-                                            "WatchedAt"
-                                        ],  # Mark when the episode was watched
-                                    }
-                                ]
-                            }
-
-                        """
-                        # Skip adding shows, because it will mark all episodes as watched
-                        elif item["Type"] == "show":
-                            # This is an episode
-                            data = {
-                                "shows": [{
-                                    "ids": {
-                                        "imdb": item["IMDB_ID"]
-                                    },
-                                    "watched_at": item["WatchedAt"]  # Mark when the episode was watched
-                                }]
-                            }
-                        """
-
-                        if data:
-                            # Make the API call to mark the item as watched
-                            response = EH.make_trakt_request(
-                                watch_history_url, payload=data
+                    for batch, response in batch_results:
+                        if response and response.status_code in [200, 201, 204]:
+                            checkpoint_manager.mark_items_completed(
+                                "trakt_watch_history_add", batch
                             )
 
-                            season_number = item.get("SeasonNumber")
-                            episode_number = item.get("EpisodeNumber")
-                            if season_number and episode_number:
-                                season_number = str(season_number).zfill(2)
-                                episode_number = str(episode_number).zfill(2)
-                                episode_title = f"[S{season_number}E{episode_number}] "
-                            else:
-                                episode_title = ""
-
-                            year_str = (
-                                f" ({item['Year']})" if item["Year"] is not None else ""
-                            )  # sometimes year is None for episodes from trakt so remove it from the print string
+                        for item in batch:
+                            item_count += 1
+                            episode_title = format_episode_prefix(item)
 
                             if response and response.status_code in [200, 201, 204]:
                                 print(
                                     f" - Adding {item['Type']} ({item_count} of {num_items}): {episode_title}{item['Title']} ({item['Year']}) to Trakt Watch History ({item['IMDB_ID']})"
                                 )
-
                             else:
                                 error_message = f"Failed to add {item['Type']} ({item_count} of {num_items}): {episode_title}{item['Title']} ({item['Year']}) to Trakt Watch History ({item['IMDB_ID']})"
                                 print(f"   - {error_message}")
                                 EL.logger.error(error_message)
 
+                    checkpoint_manager.complete_phase("trakt_watch_history_add")
                     print("Setting Trakt Watch History Complete")
                 else:
                     print("No Trakt Watch History To Set")
 
                 # Set IMDB Watch History Items
+                if imdb_watch_history_to_set:
+                    imdb_watch_history_to_set = prepare_resume_items(
+                        checkpoint_manager,
+                        "imdb_watch_history_add",
+                        imdb_watch_history_to_set,
+                        "IMDb watch history sync",
+                    )
+
                 if imdb_watch_history_to_set:
                     print("Setting IMDB Watch History Items")
 
@@ -1737,20 +1750,8 @@ def main():
                     item_count = 0
 
                     for item in imdb_watch_history_to_set:
-                        season_number = item.get("SeasonNumber")
-                        episode_number = item.get("EpisodeNumber")
-                        if season_number and episode_number:
-                            season_number = str(season_number).zfill(2)
-                            episode_number = str(episode_number).zfill(2)
-                            episode_title = f"[S{season_number}E{episode_number}] "
-                        else:
-                            episode_title = ""
-
-                        year_str = (
-                            f" ({item.get('Year')})"
-                            if item.get("Year") is not None
-                            else ""
-                        )  # Handles None safely
+                        episode_title = format_episode_prefix(item)
+                        year_str = format_year_suffix(item)
 
                         try:
                             item_count += 1
@@ -1852,6 +1853,9 @@ def main():
                                             print(
                                                 f" - Adding {item.get('Type')} ({item_count} of {num_items}): {episode_title}{item.get('Title')}{year_str} to IMDB Watch History ({item.get('IMDB_ID')})"
                                             )
+                                            checkpoint_manager.mark_item_completed(
+                                                "imdb_watch_history_add", item
+                                            )
 
                                             break  # Break the loop if successful
                                         except TimeoutException:
@@ -1866,6 +1870,9 @@ def main():
                                     error_message2 = f"   - {item['Type'].capitalize()} already exists in IMDB watch history."
                                     EL.logger.error(error_message1)
                                     EL.logger.error(error_message2)
+                                    checkpoint_manager.mark_item_completed(
+                                        "imdb_watch_history_add", item
+                                    )
                             else:
                                 # Handle the case when the URL contains "/reference"
                                 error_message1 = f"IMDB reference view setting is enabled. Adding items to IMDB Check-ins is not supported. See: https://www.imdb.com/preferences/general"
@@ -1874,6 +1881,9 @@ def main():
                                 print(f" - {error_message2}")
                                 EL.logger.error(error_message1)
                                 EL.logger.error(error_message2)
+                                checkpoint_manager.mark_item_completed(
+                                    "imdb_watch_history_add", item
+                                )
 
                         except (
                             NoSuchElementException,
@@ -1885,6 +1895,7 @@ def main():
                             EL.logger.error(error_message, exc_info=True)
                             pass
 
+                    checkpoint_manager.complete_phase("imdb_watch_history_add")
                     print("Setting IMDB Watch History Items Complete")
                 else:
                     print("No IMDB Watch History Items To Set")
@@ -1960,6 +1971,7 @@ def main():
             driver.close()
             driver.quit()
             service.stop()
+            checkpoint_manager.clear_all()
             print("IMDBTraktSyncer Complete")
 
         except TraktAuthenticationError as e:

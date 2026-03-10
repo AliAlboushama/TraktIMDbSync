@@ -19,6 +19,31 @@ class PageLoadException(Exception):
     pass
 
 
+_MEDIA_TYPE_CACHE = {}
+
+
+def get_imdb_download_directory(base_directory):
+    if os.path.basename(os.path.normpath(base_directory)) == "imdb_exports":
+        download_directory = base_directory
+    else:
+        download_directory = os.path.join(base_directory, "imdb_exports")
+    os.makedirs(download_directory, exist_ok=True)
+    return download_directory
+
+
+def _wait_for_export_request(driver, export_button):
+    try:
+        WebDriverWait(driver, 5).until(
+            lambda web_driver: (
+                export_button.get_attribute("aria-disabled") == "true"
+                or "in progress" in export_button.text.lower()
+                or "in progress" in web_driver.page_source.lower()
+            )
+        )
+    except TimeoutException:
+        time.sleep(1)
+
+
 def _wait_for_new_csv_download(directory, known_files, max_wait=30):
     download_wait_start = time.time()
 
@@ -31,9 +56,12 @@ def _wait_for_new_csv_download(directory, known_files, max_wait=30):
         new_files = sorted(
             current_files - known_files, key=os.path.getmtime, reverse=True
         )
+        active_downloads = [
+            f for f in os.listdir(directory) if f.endswith(".crdownload")
+        ]
         if new_files:
             newest_file = new_files[0]
-            if time.time() - os.path.getmtime(newest_file) < 5:
+            if not active_downloads and time.time() - os.path.getmtime(newest_file) < 5:
                 return newest_file
         time.sleep(1)
 
@@ -54,6 +82,7 @@ def generate_imdb_exports(
     remove_watched_from_watchlists_value,
     mark_rated_as_watched_value,
 ):
+    download_directory = get_imdb_download_directory(directory)
     # Generate IMDB .csv exports
 
     # Generate watchlist export if sync_watchlist_value is True
@@ -81,7 +110,7 @@ def generate_imdb_exports(
             driver.execute_script("arguments[0].scrollIntoView(true);", export_button)
             wait.until(EC.visibility_of(export_button))
             driver.execute_script("arguments[0].click();", export_button)
-            time.sleep(3)
+            _wait_for_export_request(driver, export_button)
             print("      OK Watchlist export requested", flush=True)
         except TimeoutException:
             # print("Export button not found, possibly because the list is empty.")
@@ -111,7 +140,7 @@ def generate_imdb_exports(
             driver.execute_script("arguments[0].scrollIntoView(true);", export_button)
             wait.until(EC.visibility_of(export_button))
             driver.execute_script("arguments[0].click();", export_button)
-            time.sleep(3)
+            _wait_for_export_request(driver, export_button)
             print("      OK Ratings export requested", flush=True)
         except TimeoutException:
             # print("Export button not found, possibly because the list is empty.")
@@ -145,7 +174,7 @@ def generate_imdb_exports(
             driver.execute_script("arguments[0].scrollIntoView(true);", export_button)
             wait.until(EC.visibility_of(export_button))
             driver.execute_script("arguments[0].click();", export_button)
-            time.sleep(3)
+            _wait_for_export_request(driver, export_button)
             print("      OK Check-ins export requested", flush=True)
         except TimeoutException:
             # print("Export button not found, possibly because the list is empty.")
@@ -261,6 +290,8 @@ def download_imdb_exports(
     """
     Download IMDB Exports and rename files with correct permissions.
     """
+    download_directory = get_imdb_download_directory(directory)
+
     # Load page
     success, status_code, url, driver, wait = EH.get_page_with_retries(
         "https://www.imdb.com/exports/", driver, wait
@@ -326,9 +357,9 @@ def download_imdb_exports(
     )
 
     # Clear any previous csv files
-    for file in os.listdir(directory):
+    for file in os.listdir(download_directory):
         if file.endswith(".csv"):
-            os.remove(os.path.join(directory, file))
+            os.remove(os.path.join(download_directory, file))
 
     # Download each file and rename accordingly
     file_mappings = [
@@ -344,15 +375,17 @@ def download_imdb_exports(
                 downloads_count += 1
                 print(f"    - Downloading {display_name.lower()}...", flush=True)
                 known_files = {
-                    os.path.join(directory, f)
-                    for f in os.listdir(directory)
+                    os.path.join(download_directory, f)
+                    for f in os.listdir(download_directory)
                     if f.endswith(".csv")
                 }
                 driver.execute_script("arguments[0].scrollIntoView(true);", csv_link)
                 wait.until(EC.visibility_of(csv_link))
                 driver.execute_script("arguments[0].click();", csv_link)
 
-                downloaded_file = _wait_for_new_csv_download(directory, known_files)
+                downloaded_file = _wait_for_new_csv_download(
+                    download_directory, known_files
+                )
 
                 if downloaded_file:
                     grant_permissions_and_rename_file(downloaded_file, file_name)
@@ -402,9 +435,9 @@ def get_imdb_watchlist(driver, wait, directory):
     # Get IMDB Watchlist Items
     imdb_watchlist = []
     imdb_watchlist_size = 0
+    watchlist_filename = "watchlist.csv"
     try:
         # Look for 'watchlist.csv'
-        watchlist_filename = "watchlist.csv"
         watchlist_path = os.path.join(directory, watchlist_filename)
 
         if not os.path.exists(watchlist_path):
@@ -413,7 +446,7 @@ def get_imdb_watchlist(driver, wait, directory):
             )
 
         # Open and process the 'watchlist.csv' file
-        with open(watchlist_path, "r", encoding="utf-8") as file:
+        with open(watchlist_path, "r", encoding="utf-8-sig") as file:
             reader = csv.reader(file)
             header = next(reader)  # Read the header row
 
@@ -499,9 +532,9 @@ def get_imdb_watchlist(driver, wait, directory):
 def get_imdb_ratings(driver, wait, directory):
     # Get IMDB Ratings
     imdb_ratings = []
+    ratings_filename = "ratings.csv"
     try:
         # Look for 'ratings.csv'
-        ratings_filename = "ratings.csv"
         ratings_path = os.path.join(directory, ratings_filename)
 
         if not os.path.exists(ratings_path):
@@ -510,7 +543,7 @@ def get_imdb_ratings(driver, wait, directory):
             )
 
         # Open and process the 'ratings.csv' file
-        with open(ratings_path, "r", encoding="utf-8") as file:
+        with open(ratings_path, "r", encoding="utf-8-sig") as file:
             reader = csv.reader(file)
             header = next(reader)  # Read the header row
 
@@ -584,7 +617,7 @@ def get_imdb_ratings(driver, wait, directory):
             f"{ratings_filename} file not found. Assuming the IMDB list is empty."
         )
         print(error_message)
-        EL.logger.error(error_message, exc_info=True)
+        EL.logger.warning(error_message)
         """
         error_message = str(e)
         print(f"Error: {error_message}")
@@ -604,9 +637,9 @@ def get_imdb_checkins(driver, wait, directory):
     # Get IMDB Check-ins
     imdb_checkins = []
     imdb_checkins_size = 0
+    checkins_filename = "checkins.csv"
     try:
         # Look for 'checkins.csv'
-        checkins_filename = "checkins.csv"
         checkins_path = os.path.join(directory, checkins_filename)
 
         if not os.path.exists(checkins_path):
@@ -615,7 +648,7 @@ def get_imdb_checkins(driver, wait, directory):
             )
 
         # Open and process the 'checkins.csv' file
-        with open(checkins_path, "r", encoding="utf-8") as file:
+        with open(checkins_path, "r", encoding="utf-8-sig") as file:
             reader = csv.reader(file)
             header = next(reader)  # Read the header row
 
@@ -682,7 +715,7 @@ def get_imdb_checkins(driver, wait, directory):
             f"{checkins_filename} file not found. Assuming the IMDB list is empty."
         )
         print(error_message)
-        EL.logger.error(error_message, exc_info=True)
+        EL.logger.warning(error_message)
         """
         error_message = str(e)
         print(f"Error: {error_message}")
@@ -699,13 +732,18 @@ def get_imdb_checkins(driver, wait, directory):
 
 
 def get_media_type(imdb_id):
+    if imdb_id in _MEDIA_TYPE_CACHE:
+        return _MEDIA_TYPE_CACHE[imdb_id]
+
     url = f"https://api.trakt.tv/search/imdb/{imdb_id}"
     response = EH.make_trakt_request(url)
     if response:
         results = response.json()
         if results:
             media_type = results[0].get("type")
+            _MEDIA_TYPE_CACHE[imdb_id] = media_type
             return media_type
+    _MEDIA_TYPE_CACHE[imdb_id] = None
     return None
 
 
