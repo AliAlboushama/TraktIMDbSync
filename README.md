@@ -1,7 +1,7 @@
 # TraktIMDbSync
 
-[![PyPI version](https://img.shields.io/pypi/v/TraktIMDbSync)](https://pypi.org/project/TraktIMDbSync/)
-[![Python](https://img.shields.io/pypi/pyversions/TraktIMDbSync)](https://pypi.org/project/TraktIMDbSync/)
+[![PyPI version](https://img.shields.io/pypi/v/traktimdbsync?cacheSeconds=300)](https://pypi.org/project/TraktIMDbSync/)
+[![Python](https://img.shields.io/pypi/pyversions/traktimdbsync?cacheSeconds=300)](https://pypi.org/project/TraktIMDbSync/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 TraktIMDbSync syncs Trakt and IMDb watchlists, ratings, reviews, and watch history in both directions with one Python tool.
