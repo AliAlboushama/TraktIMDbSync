@@ -52,6 +52,24 @@ Setup takes:
 - more stable Windows console output during long runs
 - cleaner onboarding and documentation
 
+## Fork comparison
+
+| Area | Original project | This fork |
+|---|---|---|
+| Trakt token recovery | Basic | Improved recovery and clearer failures |
+| Large Trakt libraries | More limited | Better paginated API reads |
+| IMDb export handling | More fragile | Safer download detection and parsing |
+| Windows console output | Can be rough on some terminals | Cleaner, safer output for long runs |
+| Onboarding | Functional | More guided setup and clearer documentation |
+
+## How to help
+
+- Star the repo if it saves you time
+- Open issues with steps, logs, and screenshots when something breaks
+- Share the project with other Trakt or IMDb users
+- Test IMDb layout changes and report what changed
+- Contribute fixes, docs, or automation guides
+
 ## Why use it
 
 - Sync watchlists, ratings, reviews, and watch history between Trakt and IMDb
