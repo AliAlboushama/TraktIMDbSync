@@ -15,10 +15,8 @@ def get_installed_version():
         for line in result.stdout.splitlines():
             if line.startswith("Version:"):
                 return line.split()[1]
-    except subprocess.CalledProcessError as e:
-        print(
-            f"Error: Could not retrieve TraktIMDbSync version using '{sys.executable} -m pip': {e}"
-        )
+    except subprocess.CalledProcessError:
+        return None
     except FileNotFoundError:
         print(
             f"Error: Python executable '{sys.executable}' does not have pip installed."
@@ -38,8 +36,7 @@ def get_latest_version():
             title = item.find("title").text
             if title:
                 return title
-    except Exception as e:
-        print(f"Error retrieving latest version: {e}")
+    except Exception:
         return None
 
 
@@ -53,12 +50,10 @@ def compare_versions(installed, latest):
 def checkVersion():
     installed_version = get_installed_version()
     if not installed_version:
-        print("TraktIMDbSync is not installed.")
         return
 
     latest_version = get_latest_version()
     if not latest_version:
-        print("Could not retrieve the latest version.")
         return
 
     if compare_versions(installed_version, latest_version):

@@ -1,7 +1,6 @@
 # TraktIMDbSync
 
-[![PyPI version](https://img.shields.io/pypi/v/TraktIMDbSync)](https://pypi.org/project/TraktIMDbSync/)
-[![Python](https://img.shields.io/pypi/pyversions/TraktIMDbSync)](https://pypi.org/project/TraktIMDbSync/)
+[![Python](https://img.shields.io/badge/python-3.6%2B-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 TraktIMDbSync syncs Trakt and IMDb watchlists, ratings, reviews, and watch history in both directions with one Python tool.
@@ -22,6 +21,15 @@ If you searched for `Trakt IMDb sync`, `IMDb Trakt watchlist sync`, `Trakt ratin
 ## Quick start
 
 Use `TraktIMDbSync` as the primary package and command name. A legacy `IMDBTraktSyncer` CLI alias is still available for compatibility.
+
+If `pip install TraktIMDbSync` says the package or version is not found, install from source for now:
+
+```bash
+git clone https://github.com/AliAlboushama/TraktIMDbSync.git
+cd TraktIMDbSync
+python -m pip install -r requirements.txt
+python -m TraktIMDbSync
+```
 
 Install:
 
@@ -114,6 +122,8 @@ Python dependencies:
 - `requests>=2.32.3`
 
 The package installs these automatically when installed with `pip`.
+
+If PyPI has not been published yet, use the source install method shown in the quick start section.
 
 ## Installation
 
