@@ -1,465 +1,161 @@
-# 🎬 IMDB Trakt Syncer
+# IMDB-Trakt-Syncer
+This Python script syncs user watchlist, ratings, reviews and watch history for Movies, TV Shows and Episodes both ways between [Trakt](https://trakt.tv/) and [IMDB](https://imdb.com/). Existing items will not be overwritten. Ratings, watchlist, comment/review & watch history sync are all optional. The user will be prompted to enter their settings and credentials on first run.
 
-<div align="center">
+The script is compatible with operating systems that support Python (v3.6 or later) and Chromedriver (Windows, Linux and Mac). If you're interested in syncing ratings between Trakt, Plex, IMDB, and TMDB, I recommend the following projects: [PlexTraktSync](https://github.com/Taxel/PlexTraktSync), [IMDB-Trakt-Syncer](https://github.com/RileyXX/IMDB-Trakt-Syncer), and [TMDB-Trakt-Syncer](https://github.com/RileyXX/TMDB-Trakt-Syncer). See below for my other [recommended projects](https://github.com/RileyXX/IMDB-Trakt-Syncer?tab=readme-ov-file#other-recommended-projects).
 
-![Python Version](https://img.shields.io/badge/python-3.8%2B-blue?style=for-the-badge&logo=python)
-![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
-![Status](https://img.shields.io/badge/status-active-success?style=for-the-badge)
-![Selenium](https://img.shields.io/badge/selenium-4.15%2B-orange?style=for-the-badge&logo=selenium)
+## Installation Instructions
+1. Install [Python](https://www.python.org/downloads/) (v3.6 or later). During Python installation, tick the box for adding Python to your PATH variable. _If Python is already installed, you can skip this step._
+2. Install the script by executing `python -m pip install IMDBTraktSyncer` in command line.
+3. Login to [Trakt](https://trakt.tv/oauth/applications) and create a new API application named `IMDBTraktSyncer`. In the "Redirect uri" field, enter `urn:ietf:wg:oauth:2.0:oob`, then save the application.
+4. Run the script by executing `IMDBTraktSyncer` in the command line.
+5. Follow the prompts during the first run. You will need to enter your Trakt `client ID` and `client secret` from step 3, as well as your IMDB `username` and `password`. Please note that these details are saved insecurely as `credentials.txt` in the same folder as the script. It is recommended to change your IMDB password to something unique beforehand.
+6. Setup is complete. The script will continue running and syncing your ratings. You can monitor its progress in the command line. See below for [setting up automation](https://github.com/RileyXX/IMDB-Trakt-Syncer?tab=readme-ov-file#for-setting-up-automation-see-the-following-wiki-pages).
 
-**Bidirectional sync between IMDB and Trakt.tv with lightning-fast performance**
-
-[Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Configuration](#️-configuration) • [Performance](#-performance-improvements)
-
-</div>
-
----
-
-## 📋 Overview
-
-IMDBTraktSyncer is a powerful Python tool that seamlessly synchronizes your movie and TV show data between IMDB and Trakt.tv. With advanced caching, fast API integration, and beautiful progress tracking, it's the most efficient way to keep your watchlists, ratings, reviews, and watch history in perfect sync.
-
-### ✨ Why Choose This Syncer?
-
-- 🚀 **10x Faster** - Cached ID resolution and fast API paths
-- 🎯 **Intelligent** - Auto-fallback when APIs fail
-- 📊 **Visual** - Real-time progress bars and statistics
-- 🔄 **Bidirectional** - Sync in both directions automatically
-- 🛡️ **Robust** - Handles network issues and continues syncing
-- 🎨 **Beautiful** - Emoji-rich terminal output with timing stats
-
----
-
-## 🌟 Features
-
-### Core Functionality
-- ✅ **Bidirectional Sync** - Automatically syncs data between IMDB and Trakt
-- 📝 **Watchlists** - Keep your watchlists synchronized
-- ⭐ **Ratings** - Sync movie and TV show ratings (1-10 scale)
-- 📖 **Reviews** - Share your reviews between platforms
-- 🎥 **Watch History** - Track what you've watched everywhere
-- 🧹 **Smart Cleanup** - Remove watched items from watchlists automatically
-
-### Advanced Features
-- ⚡ **Fast API Integration** - Uses IMDB's AJAX endpoints when available
-- 💾 **Global ID Caching** - Resolve IMDB IDs once, use everywhere
-- 🔄 **Automatic Fallback** - Switches to Selenium when APIs fail
-- 📊 **Real-time Progress** - See exactly what's happening
-- 🎯 **Multiple Selectors** - Adapts to IMDB UI changes automatically
-- ⏱️ **Timing Statistics** - Know how long each phase takes
-- 🔍 **Detailed Logging** - Full error logs for troubleshooting
-
----
-
-## 🚀 Installation
-
-### Prerequisites
-- Python 3.8 or higher
-- Chrome/Chromium browser (automatically downloaded)
-- IMDB account
-- Trakt.tv account with API access
-
-### Quick Install
-
-```bash
-# Install via pip
-pip install IMDBTraktSyncer
-
-# Or install from source
-git clone https://github.com/AliAlboushama/IMDB-Trakt-Syncer.git
-cd IMDB-Trakt-Syncer
-pip install -r requirements.txt
+## Installing the Script:
 ```
-
-### Dependencies
-
+python -m pip install IMDBTraktSyncer
 ```
-requests>=2.32.3
-selenium>=4.15.2
+_Run in your operating system's native command line._
+## Running the Script:
 ```
-
-*Chrome and ChromeDriver are downloaded automatically on first run.*
-
----
-
-## 🎮 Usage
-
-### Basic Usage
-
-```bash
-# Run the syncer
-python -m IMDBTraktSyncer
-
-# Or if installed via pip
 IMDBTraktSyncer
 ```
-
-### First Run Setup
-
-On your first run, you'll be guided through:
-
-1. **Trakt API Setup**
-   - Create an app at [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications)
-   - Use `urn:ietf:wg:oauth:2.0:oob` as the redirect URI
-
-2. **IMDB Credentials**
-   - Enter your IMDB email/phone and password
-
-3. **Sync Preferences**
-   - Choose what to sync (watchlists, ratings, reviews, watch history)
-   - Configure automatic cleanup options
-
-### Example Output
-
+_Run in your operating system's native command line._
+## Updating the Script:
 ```
-🎬 Processing Trakt Data
-────────────────────────
-  • Fetching user profile...
-  • Loading watchlist... ✓ 127 items
-  • Loading ratings... ✓ 1,432 items
-  • Loading reviews/comments... ✓ 53 items
-  • Loading watch history... ✓ 2,891 items
-  ✓ Trakt data loaded (3.2s)
-
-🎥 Processing IMDB Data
-───────────────────────
-  • Requesting IMDB data exports...
-  • Downloading IMDB export files...
-  • Parsing downloaded CSV files...
-    • Parsing watchlist... ✓ 89 items
-    • Parsing ratings... ✓ 1,102 items
-  ✓ IMDB data loaded (52.3s)
-
-📊 Analyzing & Comparing Data
-──────────────────────────────
-  • Checking list limits...
-  • Removing duplicates & filtering invalid items...
-  • Resolving conflicting IMDB IDs (using fast cached resolution)...
-      ✓ Resolved 12 ratings IDs (cache hits: 8)
-  • Comparing lists to find items to sync...
-  ✓ Analysis complete (1.8s)
-
-📋 Sync Summary
-───────────────
-  Ratings:         23 → Trakt |   18 → IMDB
-  Watchlist:       12 → Trakt |    7 → IMDB
-  Watch History:   45 → Trakt |   31 → IMDB
-
-  Total operations: 136
-
-🔄 Syncing Data
-───────────────
-  → Using API fast-path for watchlist additions
-  - Added movie (1 of 7): The Matrix (1999) to IMDB Watchlist (tt0133093) [API]
-  - Added show (2 of 7): Breaking Bad (2008) to IMDB Watchlist (tt0903747) [API]
-  ...
-
-✓ Sync complete (142.5s)
-
-═══════════════════════════════════════════════════
-✅ IMDBTraktSyncer Complete
-═══════════════════════════════════════════════════
+python -m pip install IMDBTraktSyncer --upgrade
 ```
-
----
-
-## ⚙️ Configuration
-
-### Sync Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| **Sync Watchlists** | Keep watchlists synchronized | Yes |
-| **Sync Ratings** | Sync movie/show ratings | Yes |
-| **Remove Watched from Watchlists** | Auto-cleanup watched items | No |
-| **Sync Reviews** | Share reviews between platforms | No |
-| **Sync Watch History** | Track viewing history | Yes |
-| **Mark Rated as Watched** | Automatically mark rated items as watched | No |
-| **Remove Old Watchlist Items** | Remove items older than X days | No |
-
-### Advanced Settings
-
-Configuration is stored in `credentials.txt` (JSON format):
-
-```json
-{
-  "trakt_client_id": "your_client_id",
-  "trakt_client_secret": "your_client_secret",
-  "trakt_access_token": "your_access_token",
-  "imdb_username": "your_email",
-  "imdb_password": "your_password",
-  "sync_watchlist": true,
-  "sync_ratings": true,
-  "remove_watched_from_watchlists": false,
-  "sync_reviews": false,
-  "sync_watch_history": true,
-  "mark_rated_as_watched": false,
-  "remove_watchlist_items_older_than_x_days": false,
-  "watchlist_days_to_remove": 365
-}
+_Run in your operating system's native command line._
+## Uninstalling the Script:
 ```
+IMDBTraktSyncer --uninstall
+```
+_Clears cached browsers and drivers before uninstalling. Run in your operating system's native command line._
+## Installing a Specific Version:
+```
+python -m pip install IMDBTraktSyncer==VERSION_NUMBER
+```
+_Replace `VERSION_NUMBER` with your [desired version](https://github.com/RileyXX/IMDB-Trakt-Syncer/releases) (e.g. 3.1.0) and run in your operating system's native command line._
+## Performing a Clean Uninstall:
+```
+IMDBTraktSyncer --clean-uninstall
+```
+_Clears all cached data, inluding user credentials, cached browsers and drivers before uninstalling. Run in your operating system's native command line._
+## Uninstall With Native Python Method:
+```
+python -m pip uninstall IMDBTraktSyncer
+```
+_Not recommended unless other uninstall methods failed. This method leaves behind any cached data such as user entered credentials, cached browsers, and drivers which can be deleted manually from your install directory. Run in your operating system's native command line._
 
-### Command Line Options
+# Commands for IMDBTraktSyncer
+
+Below is a list of available commands for this package, along with a brief description of their functionality. You can copy and paste them directly into your terminal.
+
+## Available Commands
+
+| **Command**               | **Description**                                                                                       |
+|---------------------------|-------------------------------------------------------------------------------------------------------|
+| `--help`                  | List available commands                                                                               |
+| `--clear-user-data`       | Clears user-entered credentials.                                                                      |
+| `--clear-cache`           | Clears cached browsers, drivers, and error logs.                                                      |
+| `--uninstall`             | Clears cached browsers and drivers before uninstalling.                                               |
+| `--clean-uninstall`       | Clears all cached data, including user credentials, cached browsers, and drivers before uninstalling. |
+| `--directory`             | Prints the package install directory.                                                                 |
+
+## Usage Example
+
+Run the following commands as needed:
 
 ```bash
-# Clear user credentials
-python -m IMDBTraktSyncer --clear-user-data
+# List available commands
+IMDBTraktSyncer --help
 
-# Clear browser cache and downloaded files
-python -m IMDBTraktSyncer --clear-cache
+# To clear user data
+IMDBTraktSyncer --clear-user-data
 
-# Show installation directory
-python -m IMDBTraktSyncer --directory
+# To clear cache
+IMDBTraktSyncer --clear-cache
 
-# Uninstall (keeps credentials)
-python -m IMDBTraktSyncer --uninstall
+# To uninstall
+IMDBTraktSyncer --uninstall
 
-# Clean uninstall (removes everything)
-python -m IMDBTraktSyncer --clean-uninstall
+# To perform a clean uninstall
+IMDBTraktSyncer --clean-uninstall
+
+# To get the installation directory
+IMDBTraktSyncer --directory
+
+# Use multiple commands at once
+IMDBTraktSyncer --clear-user-data --clear-cache
 ```
 
----
-
-## ⚡ Performance Improvements
-
-### Speed Optimizations
-
-| Feature | Improvement | Details |
-|---------|-------------|---------|
-| **Fast API Path** | 5-10x faster | Uses IMDB AJAX endpoints instead of page loads |
-| **Global ID Caching** | ~10x faster | Resolve each IMDB ID only once |
-| **HEAD Requests** | 8-10x faster | Lightweight HTTP HEAD instead of full page loads |
-| **Batch Operations** | 50x throughput | Processes 50 items per Trakt API request |
-| **Parallel Analysis** | 2-3x faster | Optimized data comparison algorithms |
-
-### Performance Metrics
-
-Based on real-world testing with 6,000+ items:
-
-```
-Phase                    | Time      | Rate
--------------------------|-----------|----------------
-Trakt Data Fetch         | 22.3s     | 312 items/sec
-IMDB Data Processing     | 189.9s    | Export generation
-Analysis & Comparison    | 0.9s      | 7,741 items/sec
-ID Resolution (cached)   | ~0.5s     | Per ID (vs 3-5s)
-Sync Operations          | Variable  | Respects API limits
-```
-
-### API Rate Limiting
-
-The syncer respects all rate limits:
-
-- **Trakt API**: 100ms delay between batch requests
-- **IMDB AJAX**: 350ms delay between operations
-- **IMDB Selenium**: 300ms-1000ms delays to avoid detection
-- **Batch operations**: Longer delays every 10 operations
-
----
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-<details>
-<summary><b>NoSuchElementException - Watchlist button not found</b></summary>
-
-**Solution**: The syncer automatically tries 6 different selectors. If all fail:
-1. Check if you're logged into IMDB
-2. Verify IMDB hasn't changed their UI significantly
-3. Check the error logs in `log.txt`
-4. The syncer will continue with other items
-
-</details>
-
-<details>
-<summary><b>IMDB export generation timing out</b></summary>
-
-**Solution**: 
-- IMDB exports can take 2-5 minutes to generate
-- The syncer waits up to 20 minutes automatically
-- If your account has 1000+ items, this is normal
-- Progress updates show every 30 seconds
-
-</details>
-
-<details>
-<summary><b>Trakt API rate limit exceeded</b></summary>
-
-**Solution**:
-- The syncer has built-in retry logic
-- It will wait and automatically retry
-- Rate limits reset every hour
-- Large syncs (5000+ items) may take multiple runs
-
-</details>
-
-<details>
-<summary><b>StaleElementReferenceException</b></summary>
-
-**Solution**: 
-- Fixed in v3.7+ with automatic retry logic
-- The syncer re-finds elements before each action
-- Up to 3 automatic retries per element
-
-</details>
-
-### Debug Mode
-
-Check detailed logs in `log.txt` in your package directory:
-
-```bash
-# Find your log file location
-python -m IMDBTraktSyncer --directory
-```
-
----
-
-## 🏗️ Architecture
-
-### Component Overview
-
-```
-IMDBTraktSyncer/
-├── IMDBTraktSyncer.py      # Main orchestration
-├── traktData.py             # Trakt API integration
-├── imdbData.py              # IMDB data extraction
-├── errorHandling.py         # Error handling & ID resolution
-├── syncProgress.py          # Progress tracking (NEW)
-├── verifyCredentials.py     # Authentication
-├── checkChrome.py           # Browser management
-└── errorLogger.py           # Logging system
-```
-
-### Key Technologies
-
-- **Selenium 4.15+** - Browser automation
-- **Requests 2.32+** - HTTP client for APIs
-- **BeautifulSoup** (optional) - HTML parsing backup
-- **Chrome/Chromium** - Automated browser
-
-### Data Flow
-
-```
-1. Authentication → Verify IMDB & Trakt credentials
-2. Fetch Data → Download from both platforms
-3. Parse & Clean → Extract and normalize data
-4. Analyze → Compare and find differences
-5. Resolve IDs → Fast cached ID resolution
-6. Sync → Bidirectional data push
-7. Verify → Confirm operations succeeded
-```
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Here's how you can help:
-
-### Reporting Issues
-
-1. Check existing issues first
-2. Provide your Python version
-3. Include relevant log snippets
-4. Describe what you expected vs. what happened
-
-### Pull Requests
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-### Development Setup
-
-```bash
-# Clone the repo
-git clone https://github.com/RileyXX/IMDB-Trakt-Syncer.git
-cd IMDB-Trakt-Syncer
-
-# Install in development mode
-pip install -e .
-
-# Run tests (if available)
-python -m pytest
-```
-
----
-
-### Feature Coverage
-
-```
-✅ Watchlist Sync          - 100%
-✅ Ratings Sync            - 100%
-✅ Watch History Sync      - 100%
-✅ Reviews Sync            - 90% (IMDB has some limitations)
-✅ Bidirectional           - 100%
-✅ Error Recovery          - 95%
-✅ API Optimization        - 100%
-```
-
----
-
-## 🎯 Roadmap
-
-### Upcoming Features
-
-- [ ] GUI application for easier setup
-- [ ] Docker container support
-- [ ] Scheduled automatic syncing
-- [ ] Conflict resolution options
-- [ ] Export to other platforms (Letterboxd, etc.)
-- [ ] Two-way real-time sync
-- [ ] Mobile app integration
-
-### Known Limitations
-
-- IMDB has a 10,000 item limit per list
-- Reviews must be 600+ characters to sync to IMDB
-- Some IMDB privacy settings may interfere with syncing
-- Trakt free accounts have 100 item watchlist limit
-
----
-
-## 📜 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-### MIT License Summary
-
-```
-✓ Commercial use
-✓ Modification
-✓ Distribution
-✓ Private use
-✗ Liability
-✗ Warranty
-```
-
----
-
-### Useful Links
-
-- [Trakt API Documentation](https://trakt.docs.apiary.io/)
-- [IMDB Help Center](https://help.imdb.com/)
-- [Selenium Documentation](https://www.selenium.dev/documentation/)
-
----
-
-## ⭐ Star History
-
-If you find this project useful, please consider giving it a star! ⭐
-
-It helps others discover the project and motivates continued development.
-
----
-
-<div align="center">
-
-**Made with ❤️ by the open-source community**
-
-[⬆ Back to Top](#-imdb-trakt-syncer)
-
-</div>
-
+## Alternative Manual Installation Method (without pip install)
+1. Install [Python](https://www.python.org/downloads/) (v3.6 or later). During Python installation, tick the box for adding Python to your PATH variable.  _If Python is already installed, you can skip this step._
+2. Download the latest `.zip` directly from GitHub [here](https://github.com/RileyXX/IMDB-Trakt-Syncer/archive/refs/heads/main.zip) and extract it to the desired directory.
+3. Open your operating systems native command line interface, use it to navigate to the extracted folder and run `python -m pip install requirements.txt`.
+4. Login to [Trakt](https://trakt.tv/oauth/applications) and create a new API application named `IMDBTraktSyncer`. In the "Redirect uri" field, enter `urn:ietf:wg:oauth:2.0:oob`, then save the application.
+5. Run `IMDBTraktSyncer.py` or open the terminal and navigate to the folder where `IMDBTraktSyncer.py` is located. Run `IMDBTraktSyncer.py` in the terminal.
+6. Follow the prompts during the first run. You will need to enter your Trakt `client ID` and `client secret` from step 3, as well as your IMDB `username` and `password`. Please note that these details are saved insecurely as `credentials.txt` in the same folder as the script. It is recommended to change your IMDB password to something unique beforehand.
+7. Setup is complete. The script will continue running and syncing your ratings. You can monitor its progress in the command line. See below for [setting up automation](https://github.com/RileyXX/IMDB-Trakt-Syncer#for-setting-up-automation-see-the-following-wiki-pages).
+
+## For Setting Up Automation See the Following Wiki Pages:
+- Setup Automation for:
+   - [Windows](https://github.com/RileyXX/IMDB-Trakt-Syncer/wiki/Setting-Up-Automation-on-Windows)
+   - [Linux](https://github.com/RileyXX/IMDB-Trakt-Syncer/wiki/Setting-Up-Automation-on-Linux)
+   - [macOS](https://github.com/RileyXX/IMDB-Trakt-Syncer/wiki/Setting-Up-Automation-on-macOS)
+- Python Script to Update all Packages with Pip (Windows, Linux, Mac, ChromeOS, etc.) [Link #1](https://github.com/RileyXX/IMDB-Trakt-Syncer/wiki/Python-Script-to-Update-all-Packages-with-Pip-\(Windows,-Linux,-Mac,-ChromeOS,-etc\))
+
+## Troubleshooting, Known Issues, Workarounds & Future Outlook
+- If any of your details change (passwords, logins, API keys, etc.), simply run `IMDBTraktSyncer --clear-user-data` to reset your credentials. Alternatively, open `credentials.txt`, modify your details, save it and then run the script again. You can also simply delete `credentials.txt` to reset the script and it will prompt you to enter your new details on the next run.
+- If IMDB requires a captcha on login, and you see "Not signed in" appear in the script, the captcha is likely the cause. To fix this, navigate to the IMDB website in your browser (preferably Chrome) from the same computer. If you're already logged in, log out and log back in. It may ask you to fill in a captcha. Complete the captcha and finish logging in. After successfully logging in on your browser, run the script again, and it should work. You may need to repeat this step several times if the issue persists. Adding a captcha solver to the script is being considered but not currently implemented. [Issue #2](https://github.com/RileyXX/IMDB-Trakt-Syncer/issues/2)
+- Due to IMDB's lack of API and rating import ability, this script uses an unconventional method that mimics using a web browser to set ratings on IMDB. Therefore, there are many points of failure that could arise. The script will be updated as best as possible.
+
+## Screenshot
+![Demo](https://i.imgur.com/QXCtGrr.png)
+
+## Sponsorships, Donations, and Custom Projects
+If you find my scripts helpful, you can become a [sponsor](https://github.com/sponsors/RileyXX) and support my projects! If you need help with a project, open an issue, and I'll do my best to assist you. For other inquiries and custom projects, you can contact me on [Twitter](https://twitter.com/RileyxBell).
+
+#### More Donation Options:
+- Cashapp: [$rileyxx](https://cash.app/$rileyxx/)
+- Venmo: [@rileyxx](https://account.venmo.com/u/rileyxx)
+- Bitcoin: `bc1qrjevwqv49z8y77len3azqfghxrjmrjvhy5zqau`
+
+## Also Posted On
+- [PyPi](https://pypi.org/project/IMDBTraktSyncer/)
+- [Reddit](https://www.reddit.com/r/trakt/comments/17xd8ic/imdb_trakt_watchlistrating_syncer_tool_sync_both/)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## Other Recommended Projects:
+
+| Project Name | Description |
+|--------------|-------------|
+| [PlexTraktSync](https://github.com/Taxel/PlexTraktSync) | A script that syncs user watch history and ratings between Trakt and Plex (without needing a PlexPass or Trakt VIP subscription). |
+| [IMDB-Trakt-Syncer](https://github.com/RileyXX/IMDB-Trakt-Syncer) | A script that syncs user watchlist, ratings, reviews and watch history both ways between Trakt and IMDB. |
+| [TMDB-Trakt-Syncer](https://github.com/RileyXX/TMDB-Trakt-Syncer) | A script that syncs user watchlist and ratings both ways between Trakt and TMDB. |
+| [PlexPreferNonForcedSubs](https://github.com/RileyXX/PlexPreferNonForcedSubs) | A script that sets all movies and shows in your local Plex library to English non-forced subtitles by default. |
+| [Casvt / AudioSubChanger](https://github.com/Casvt/Plex-scripts/blob/main/media_management/audio_sub_changer.py) | A script with advanced options for changing audio & subtitle tracks in Plex. |
+| [Casvt / PlexAutoDelete](https://github.com/Casvt/Plex-scripts/blob/main/media_management/plex_auto_delete.py) | A script for automatically deleting watched content from Plex. |
+| [universal-trakt-scrobbler](https://github.com/trakt-tools/universal-trakt-scrobbler) | An extension that automatically scrobbles TV shows and Movies from several streaming services to Trakt. |
+| [Netflix-to-Trakt-Import](https://github.com/jensb89/Netflix-to-Trakt-Import) | A tool to import your Netflix viewing history into Trakt. |
+| [trakt-tv-backup](https://darekkay.com/blog/trakt-tv-backup/) | A command-line tool for backing up your Trakt.tv data. |
+| [blacktwin / JBOPS](https://github.com/blacktwin/JBOPS) | A collection of scripts and tools for enhancing and automating tasks in Plex. |
+| [Casvt / Plex-scripts](https://github.com/Casvt/Plex-scripts) | A collection of useful scripts for Plex automation and management. |
+| [trakt---letterboxd-import](https://github.com/jensb89/trakt---letterboxd-import) | A tool to import your Letterboxd ratings and watchlist into Trakt. |
+| [TraktRater](https://github.com/damienhaynes/TraktRater/) | A tool to help users transfer user episode, show, and movie user ratings and watchlists from multiple media database sites around the web. |
+| [TvTimeToTrakt](https://github.com/lukearran/TvTimeToTrakt) | A tool to sync your TV Time watch history with Trakt.tv. |
+| [Plex Media Server](https://www.plex.tv/media-server-downloads/#plex-app) | A media server software to organize and stream your personal media collection. |
+| [Radarr](https://github.com/Radarr/Radarr) | A movie collection manager and downloader for various platforms. |
+| [Sonarr](https://github.com/Sonarr/Sonarr) | A TV show collection manager and downloader for various platforms. |
+| [Jackett](https://github.com/Jackett/Jackett) | A proxy server that provides API support for various torrent trackers commonly used with Radarr and Sonarr. |
+| [qBittorrent](https://github.com/qbittorrent/qBittorrent) | A free and open-source BitTorrent client. |
+| [AirVPN](https://airvpn.org/) | A VPN client with port forwarding support. Great VPN for torrents. |
+| [Overseerr](https://github.com/sct/overseerr) | A request management and media discovery tool for your home media server. |
+| [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) | A reverse proxy solution to bypass Cloudflare protection and access websites commonly used with Jackett. |
+| [th-ch/youtube-music](https://github.com/th-ch/youtube-music) | A lightweight and feature-rich desktop client for YouTube Music, offering additional features like ad-blocking, sponsorblock and customizable themes. |
+| [ReVanced](https://github.com/revanced) | A community-driven project to modify and enhance YouTube and other apps on Android, offering features such as ad-blocking, background playback, and other advanced customization options. |
+| uBlock Origin [Chrome](https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh) / [Firefox](https://addons.mozilla.org/en-US/firefox/addon/ublock-origin/) | A powerful, open-source browser extension for blocking ads, trackers, and other unwanted content. |
+| SponsorBlock [Chrome](https://chromewebstore.google.com/detail/sponsorblock-for-youtube/mnjggcdmjocbbbhaepdhchncahnbgone) / [Firefox](https://addons.mozilla.org/en-US/firefox/addon/sponsorblock/) | A browser extension that automatically skips sponsored segments in YouTube videos. |
+| Enhancer for YouTube [Chrome](https://chromewebstore.google.com/detail/enhancer-for-youtube/ponfpcnoihfmfllpaingbgckeeldkhle) / [Firefox](https://addons.mozilla.org/en-US/firefox/addon/enhancer-for-youtube/) | A browser extension that adds a wide range of customization options and playback enhancements for YouTube, including the ability to force playback resolution. |
+| Return YouTube Dislike [Chrome](https://chromewebstore.google.com/detail/return-youtube-dislike/gebbhagfogifgggkldgodflihgfeippi) / [Firefox](https://addons.mozilla.org/en-US/firefox/addon/return-youtube-dislikes/) | A browser extension that restores the dislike count on YouTube videos. |
