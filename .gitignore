@@ -19,3 +19,15 @@ IMDBTraktSyncer/FIXES_APPLIED.md
 IMDBTraktSyncer/QUICKSTART.md
 IMDBTraktSyncer/CHANGELOG.md
 IMDBTraktSyncer/CHANGELOG.md
+IMDBTraktSyncer/chrome-146.0.7680.66.zip
+IMDBTraktSyncer/chromedriver-146.0.7680.66.zip
+IMDBTraktSyncer/bce33322-b1e2-4d69-86ee-180e1ac3759d.csv
+IMDBTraktSyncer/Chromedriver/146.0.7680.66/chromedriver-win64/chromedriver.exe
+/IMDBTraktSyncer/selenium-profile-test
+/IMDBTraktSyncer/selenium-profile-test2
+/IMDBTraktSyncer/ChromeProfile/146.0.7680.66
+IMDBTraktSyncer/sync_checkpoint.json
+
+# Python cache
+__pycache__/
+*.py[cod]
