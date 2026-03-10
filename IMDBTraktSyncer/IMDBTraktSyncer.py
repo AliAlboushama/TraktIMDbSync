@@ -61,7 +61,7 @@ def prepare_resume_items(checkpoint_manager, phase_name, items, label):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="IMDBTraktSyncer CLI")
+    parser = argparse.ArgumentParser(description="TraktIMDbSync CLI")
     parser.add_argument(
         "--clear-user-data",
         action="store_true",
@@ -116,7 +116,7 @@ def main():
         ]
     ):
         # Run main package
-        print("Starting IMDBTraktSyncer....")
+        print("Starting TraktIMDbSync....")
         from IMDBTraktSyncer import checkVersion as CV
         from IMDBTraktSyncer import verifyCredentials as VC
         from IMDBTraktSyncer import checkChrome as CC
@@ -355,7 +355,7 @@ def main():
                     )
 
                     print("\nFor more details, see the following GitHub link:")
-                    print("https://github.com/RileyXX/IMDB-Trakt-Syncer/issues/2")
+                    print("https://github.com/AliAlboushama/TraktIMDbSync/issues/2")
 
                     print("\nStopping script...")
 
@@ -1972,7 +1972,7 @@ def main():
             driver.quit()
             service.stop()
             checkpoint_manager.clear_all()
-            print("IMDBTraktSyncer Complete")
+            print("TraktIMDbSync Complete")
 
         except TraktAuthenticationError as e:
             print(f"\nTrakt authentication error: {e}")

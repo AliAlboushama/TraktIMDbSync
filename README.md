@@ -1,29 +1,38 @@
-# IMDB-Trakt-Syncer
+# TraktIMDbSync
 
-[![PyPI version](https://img.shields.io/pypi/v/IMDBTraktSyncer)](https://pypi.org/project/IMDBTraktSyncer/)
-[![Python](https://img.shields.io/pypi/pyversions/IMDBTraktSyncer)](https://pypi.org/project/IMDBTraktSyncer/)
+[![PyPI version](https://img.shields.io/pypi/v/TraktIMDbSync)](https://pypi.org/project/TraktIMDbSync/)
+[![Python](https://img.shields.io/pypi/pyversions/TraktIMDbSync)](https://pypi.org/project/TraktIMDbSync/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Sync Trakt and IMDb watchlists, ratings, reviews, and watch history in both directions with one Python tool.
+TraktIMDbSync syncs Trakt and IMDb watchlists, ratings, reviews, and watch history in both directions with one Python tool.
 
 This project automates the painful parts of keeping both accounts in sync. It pulls structured data from Trakt, exports your IMDb data, compares both sides, and only applies the missing changes instead of blindly overwriting everything.
 
 This repository is a maintained fork focused on reliability, clearer setup, safer error handling, and a better onboarding experience.
 
+Branding note:
+
+- Project name: `TraktIMDbSync`
+- Python package name: `TraktIMDbSync`
+- Primary module entrypoint: `python -m TraktIMDbSync`
+- Legacy CLI alias: `IMDBTraktSyncer`
+
 If you searched for `Trakt IMDb sync`, `IMDb Trakt watchlist sync`, `Trakt ratings sync`, or `IMDb watch history to Trakt`, this is the tool built for that job.
 
 ## Quick start
 
+Use `TraktIMDbSync` as the primary package and command name. A legacy `IMDBTraktSyncer` CLI alias is still available for compatibility.
+
 Install:
 
 ```bash
-python -m pip install IMDBTraktSyncer
+python -m pip install TraktIMDbSync
 ```
 
 Run:
 
 ```bash
-python -m IMDBTraktSyncer
+python -m TraktIMDbSync
 ```
 
 Setup takes:
@@ -109,19 +118,19 @@ The package installs these automatically when installed with `pip`.
 ## Installation
 
 ```bash
-python -m pip install IMDBTraktSyncer
+python -m pip install TraktIMDbSync
 ```
 
 Run the app:
 
 ```bash
-python -m IMDBTraktSyncer
+python -m TraktIMDbSync
 ```
 
 You can also use the console entrypoint:
 
 ```bash
-IMDBTraktSyncer
+TraktIMDbSync
 ```
 
 ## Quick start tutorial
@@ -141,7 +150,7 @@ urn:ietf:wg:oauth:2.0:oob
 ### 2. Run the syncer for the first time
 
 ```bash
-python -m IMDBTraktSyncer
+python -m TraktIMDbSync
 ```
 
 On first run, the app will ask for:
@@ -216,30 +225,30 @@ Important:
 Find the package directory:
 
 ```bash
-python -m IMDBTraktSyncer --directory
+python -m TraktIMDbSync --directory
 ```
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `IMDBTraktSyncer --help` | Show available CLI options |
-| `IMDBTraktSyncer --directory` | Print the package directory |
-| `IMDBTraktSyncer --clear-user-data` | Remove saved credentials and prompts |
-| `IMDBTraktSyncer --clear-cache` | Remove cached browsers, drivers, and logs |
-| `IMDBTraktSyncer --uninstall` | Clear browser cache before uninstalling |
-| `IMDBTraktSyncer --clean-uninstall` | Remove all cached data and credentials |
+| `TraktIMDbSync --help` | Show available CLI options |
+| `TraktIMDbSync --directory` | Print the package directory |
+| `TraktIMDbSync --clear-user-data` | Remove saved credentials and prompts |
+| `TraktIMDbSync --clear-cache` | Remove cached browsers, drivers, and logs |
+| `TraktIMDbSync --uninstall` | Clear browser cache before uninstalling |
+| `TraktIMDbSync --clean-uninstall` | Remove all cached data and credentials |
 
 ## Updating
 
 ```bash
-python -m pip install IMDBTraktSyncer --upgrade
+python -m pip install TraktIMDbSync --upgrade
 ```
 
 Install a specific version:
 
 ```bash
-python -m pip install IMDBTraktSyncer==VERSION_NUMBER
+python -m pip install TraktIMDbSync==VERSION_NUMBER
 ```
 
 ## Manual install from source
@@ -255,7 +264,7 @@ python -m pip install -r requirements.txt
 4. Run the app
 
 ```bash
-python -m IMDBTraktSyncer
+python -m TraktIMDbSync
 ```
 
 ## Common use cases
@@ -313,7 +322,7 @@ Wait longer before cancelling. IMDb export generation can take several minutes f
 Use:
 
 ```bash
-python -m IMDBTraktSyncer --directory
+python -m TraktIMDbSync --directory
 ```
 
 Then inspect `log.txt` in that directory.
@@ -346,7 +355,8 @@ Please understand the tradeoffs:
 
 | Path | Purpose |
 |---|---|
-| `IMDBTraktSyncer/IMDBTraktSyncer.py` | Main CLI entrypoint |
+| `TraktIMDbSync/__main__.py` | Public module entrypoint |
+| `IMDBTraktSyncer/IMDBTraktSyncer.py` | Core CLI implementation |
 | `IMDBTraktSyncer/traktData.py` | Trakt reads and transformation |
 | `IMDBTraktSyncer/imdbData.py` | IMDb export download and parsing |
 | `IMDBTraktSyncer/errorHandling.py` | Retry logic, helpers, and recovery |

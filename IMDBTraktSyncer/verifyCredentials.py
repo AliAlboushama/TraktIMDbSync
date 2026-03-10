@@ -80,7 +80,7 @@ def prompt_get_credentials():
                 print(
                     "  1. Login to Trakt and navigate to your API apps page: https://trakt.tv/oauth/applications"
                 )
-                print("  2. Create a new API application named 'IMDBTraktSyncer'.")
+                print("  2. Create a new API application named 'TraktIMDbSync'.")
                 print("  3. Use 'urn:ietf:wg:oauth:2.0:oob' as the Redirect URI.")
                 print("\n")
                 prompt_message = "Please enter your Trakt Client ID: "

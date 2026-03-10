@@ -3,11 +3,14 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "IMDBTraktSyncer"
+name = "TraktIMDbSync"
 version = "3.6.8"
-description = "A python script that syncs user watchlist, ratings, reviews and watch history for Movies, TV Shows and Episodes both ways between Trakt and IMDB."
+description = "TraktIMDbSync is a Python tool that syncs Trakt and IMDb watchlists, ratings, reviews, and watch history in both directions."
 authors = [
     {name = "RileyXX"}
+]
+maintainers = [
+    {name = "AliAlboushama"}
 ]
 license = {file = "LICENSE"}
 readme = "README.md"
@@ -26,15 +29,15 @@ dependencies = [
 ]
 
 [project.urls]
-homepage = "https://github.com/RileyXX/IMDB-Trakt-Syncer"
-issues = "https://github.com/RileyXX/IMDB-Trakt-Syncer/issues"
-changelog = "https://github.com/RileyXX/IMDB-Trakt-Syncer/releases"
-funding = "https://github.com/sponsors/RileyXX"
-repository = "https://github.com/RileyXX/IMDB-Trakt-Syncer"
-documentation = "https://github.com/RileyXX/IMDB-Trakt-Syncer"
+homepage = "https://github.com/AliAlboushama/TraktIMDbSync"
+issues = "https://github.com/AliAlboushama/TraktIMDbSync/issues"
+changelog = "https://github.com/AliAlboushama/TraktIMDbSync/releases"
+repository = "https://github.com/AliAlboushama/TraktIMDbSync"
+documentation = "https://github.com/AliAlboushama/TraktIMDbSync"
 
 [project.scripts]
-IMDBTraktSyncer = "IMDBTraktSyncer.IMDBTraktSyncer:main"
+TraktIMDbSync = "TraktIMDbSync:main"
+IMDBTraktSyncer = "TraktIMDbSync:main"
 
 [tool.setuptools]
-packages = ["IMDBTraktSyncer"]
+packages = ["IMDBTraktSyncer", "TraktIMDbSync"]

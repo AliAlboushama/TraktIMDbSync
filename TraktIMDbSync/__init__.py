@@ -1,0 +1,1 @@
+from IMDBTraktSyncer.IMDBTraktSyncer import main
