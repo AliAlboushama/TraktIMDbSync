@@ -1,6 +1,13 @@
 import traceback
 import requests
-from requests.exceptions import ConnectionError, RequestException, Timeout, TooManyRedirects, SSLError, ProxyError
+from requests.exceptions import (
+    ConnectionError,
+    RequestException,
+    Timeout,
+    TooManyRedirects,
+    SSLError,
+    ProxyError,
+)
 import time
 import os
 import inspect
@@ -10,44 +17,161 @@ from datetime import datetime, timedelta
 from selenium.common.exceptions import WebDriverException, TimeoutException
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from IMDBTraktSyncer import verifyCredentials as VC
 from IMDBTraktSyncer import errorLogger as EL
 
+
+TRAKT_SUCCESS_CODES = {200, 201, 204}
+_REQUEST_SESSION = requests.Session()
+
+
 class PageLoadException(Exception):
     pass
+
 
 def report_error(error_message):
     github_issue_url = "https://github.com/RileyXX/IMDB-Trakt-Syncer/issues/new?template=bug_report.yml"
     traceback_info = traceback.format_exc()
 
-    print("\n--- ERROR ---")
-    print(error_message)
-    print("Please submit the error to GitHub with the following information:")
-    print("-" * 50)
-    print(traceback_info)
-    print("-" * 50)
-    print(f"Submit the error here: {github_issue_url}")
-    print("-" * 50)
+    def safe_print(value=""):
+        text = str(value)
+        try:
+            print(text)
+        except UnicodeEncodeError:
+            print(text.encode("ascii", errors="replace").decode("ascii"))
+
+    safe_print("\n--- ERROR ---")
+    safe_print(error_message)
+    safe_print("Please submit the error to GitHub with the following information:")
+    safe_print("-" * 50)
+    safe_print(traceback_info)
+    safe_print("-" * 50)
+    safe_print(f"Submit the error here: {github_issue_url}")
+    safe_print("-" * 50)
+
+
+def is_trakt_success(response):
+    return response is not None and response.status_code in TRAKT_SUCCESS_CODES
+
+
+def _load_trakt_auth_headers():
+    credentials = VC.load_credentials()
+    trakt_client_id = credentials.get("trakt_client_id")
+    trakt_access_token = credentials.get("trakt_access_token")
+
+    if (
+        not trakt_client_id
+        or trakt_client_id == "empty"
+        or not trakt_access_token
+        or trakt_access_token == "empty"
+    ):
+        trakt_client_id, _, trakt_access_token, _, _, _ = VC.prompt_get_credentials()
+
+    return {
+        "Content-Type": "application/json",
+        "trakt-api-version": "2",
+        "trakt-api-key": trakt_client_id,
+        "Authorization": f"Bearer {trakt_access_token}",
+    }
+
+
+def refresh_trakt_access_token():
+    credentials = VC.load_credentials()
+    client_id = credentials.get("trakt_client_id")
+    client_secret = credentials.get("trakt_client_secret")
+    refresh_token = credentials.get("trakt_refresh_token")
+
+    if (
+        not client_id
+        or client_id == "empty"
+        or not client_secret
+        or client_secret == "empty"
+    ):
+        return None
+
+    from IMDBTraktSyncer import authTrakt
+
+    access_token, new_refresh_token, expiration_time = authTrakt.authenticate(
+        client_id,
+        client_secret,
+        refresh_token if refresh_token != "empty" else None,
+    )
+
+    credentials["trakt_access_token"] = access_token
+    credentials["trakt_refresh_token"] = new_refresh_token
+    credentials["trakt_token_expires"] = expiration_time
+    VC.save_credentials(credentials)
+
+    return {
+        "Content-Type": "application/json",
+        "trakt-api-version": "2",
+        "trakt-api-key": client_id,
+        "Authorization": f"Bearer {access_token}",
+    }
+
+
+def build_trakt_sync_payload(items, include_rating=False, include_watched_at=False):
+    payload = {"movies": [], "shows": [], "episodes": []}
+    payload_key_map = {"movie": "movies", "show": "shows", "episode": "episodes"}
+
+    for item in items:
+        media_type = item.get("Type")
+        imdb_id = item.get("IMDB_ID")
+        payload_key = payload_key_map.get(media_type)
+        if not payload_key or not imdb_id:
+            continue
+
+        entry = {"ids": {"imdb": imdb_id}}
+
+        if include_rating and item.get("Rating") is not None:
+            entry["rating"] = item["Rating"]
+
+        if include_watched_at and item.get("WatchedAt"):
+            entry["watched_at"] = item["WatchedAt"]
+
+        payload[payload_key].append(entry)
+
+    return {key: value for key, value in payload.items() if value}
+
+
+def chunk_list(items, size):
+    for index in range(0, len(items), size):
+        yield items[index : index + size]
+
+
+def sync_trakt_items_in_batches(
+    url, items, batch_size=100, include_rating=False, include_watched_at=False
+):
+    results = []
+    for batch in chunk_list(items, batch_size):
+        payload = build_trakt_sync_payload(
+            batch,
+            include_rating=include_rating,
+            include_watched_at=include_watched_at,
+        )
+        if not payload:
+            continue
+
+        response = make_trakt_request(url, payload=payload)
+        results.append((batch, response))
+
+    return results
+
 
 def make_trakt_request(url, headers=None, params=None, payload=None, max_retries=5):
-
     # Set default headers if none are provided
+    should_retry_auth = headers is None
     if headers is None:
-        # Get credentials
-        trakt_client_id, _, trakt_access_token, _, _, _ = VC.prompt_get_credentials()
-        
-        headers = {
-            'Content-Type': 'application/json',
-            'trakt-api-version': '2',
-            'trakt-api-key': trakt_client_id,
-            'Authorization': f'Bearer {trakt_access_token}'
-        }
-    
+        headers = _load_trakt_auth_headers()
+
     retry_delay = 1  # Initial delay between retries (in seconds)
     retry_attempts = 0  # Count of retry attempts made
     connection_timeout = 20  # Timeout for requests (in seconds)
-    total_wait_time = sum(1 * (2 ** i) for i in range(max_retries))  # Total possible wait time
+    total_wait_time = sum(
+        1 * (2**i) for i in range(max_retries)
+    )  # Total possible wait time
 
     # Retry loop to handle network errors or server overload scenarios
     while retry_attempts < max_retries:
@@ -57,35 +181,63 @@ def make_trakt_request(url, headers=None, params=None, payload=None, max_retries
             if payload is None:
                 if params:
                     # GET request with query parameters
-                    response = requests.get(url, headers=headers, params=params, timeout=connection_timeout)
+                    response = _REQUEST_SESSION.get(
+                        url, headers=headers, params=params, timeout=connection_timeout
+                    )
                 else:
                     # GET request without query parameters
-                    response = requests.get(url, headers=headers, timeout=connection_timeout)
+                    response = _REQUEST_SESSION.get(
+                        url, headers=headers, timeout=connection_timeout
+                    )
             else:
                 # POST request with JSON payload
-                response = requests.post(url, headers=headers, json=payload, timeout=connection_timeout)
-            
+                response = _REQUEST_SESSION.post(
+                    url, headers=headers, json=payload, timeout=connection_timeout
+                )
+
             if response is not None:
                 # If request is successful, return the response
-                if response.status_code in [200, 201, 204]:
+                if response.status_code in TRAKT_SUCCESS_CODES:
                     return response
-                
+
+                elif response.status_code == 401 and should_retry_auth:
+                    try:
+                        headers = refresh_trakt_access_token()
+                    except Exception as auth_error:
+                        error_message = (
+                            f"Failed to refresh Trakt access token: {auth_error}"
+                        )
+                        print(f" - {error_message}")
+                        EL.logger.error(error_message, exc_info=True)
+                        return response
+
+                    if headers:
+                        should_retry_auth = False
+                        continue
+                    return response
+
                 # Handle retryable server errors and rate limit exceeded
                 elif response.status_code in [429, 500, 502, 503, 504, 520, 521, 522]:
                     retry_attempts += 1  # Increment retry counter
 
                     # Respect the 'Retry-After' header if provided, otherwise use default delay
-                    retry_after = int(response.headers.get('Retry-After', retry_delay))
+                    retry_after = int(response.headers.get("Retry-After", retry_delay))
                     if response.status_code != 429:
-                        remaining_time = sum(1 * (2 ** i) for i in range(retry_attempts, max_retries))
-                        print(f" - Server returned {response.status_code}. Retrying after {retry_after}s... "
-                              f"({retry_attempts}/{max_retries}) - Time remaining: {remaining_time}s")
-                        EL.logger.warning(f"Server returned {response.status_code}. Retrying after {retry_after}s... "
-                                          f"({retry_attempts}/{max_retries}) - Time remaining: {remaining_time}s")
+                        remaining_time = sum(
+                            1 * (2**i) for i in range(retry_attempts, max_retries)
+                        )
+                        print(
+                            f" - Server returned {response.status_code}. Retrying after {retry_after}s... "
+                            f"({retry_attempts}/{max_retries}) - Time remaining: {remaining_time}s"
+                        )
+                        EL.logger.warning(
+                            f"Server returned {response.status_code}. Retrying after {retry_after}s... "
+                            f"({retry_attempts}/{max_retries}) - Time remaining: {remaining_time}s"
+                        )
 
                     time.sleep(retry_after)  # Wait before retrying
                     retry_delay *= 2  # Apply exponential backoff for retries
-                
+
                 else:
                     # Handle non-retryable HTTP status codes
                     status_message = get_trakt_message(response.status_code)
@@ -96,20 +248,34 @@ def make_trakt_request(url, headers=None, params=None, payload=None, max_retries
             else:
                 # Failsafe in case response is still None for any unexpected reason
                 retry_attempts += 1
-                print(f" - No response received. Retrying... ({retry_attempts}/{max_retries})")
-                EL.logger.warning(f"No response received. Retrying... ({retry_attempts}/{max_retries})")
+                print(
+                    f" - No response received. Retrying... ({retry_attempts}/{max_retries})"
+                )
+                EL.logger.warning(
+                    f"No response received. Retrying... ({retry_attempts}/{max_retries})"
+                )
                 time.sleep(retry_delay)
                 retry_delay *= 2
 
         # Handle Network errors (connection issues, timeouts, SSL, etc.)
-        except (ConnectionError, Timeout, TooManyRedirects, SSLError, ProxyError) as network_error:
+        except (
+            ConnectionError,
+            Timeout,
+            TooManyRedirects,
+            SSLError,
+            ProxyError,
+        ) as network_error:
             retry_attempts += 1  # Increment retry counter
-            remaining_time = sum(1 * (2 ** i) for i in range(retry_attempts, max_retries))
-            print(f" - Network error: {network_error}. Retrying ({retry_attempts}/{max_retries})... "
-                  f"Time remaining: {remaining_time}s")
-            EL.logger.warning(f"Network error: {network_error}. Retrying ({retry_attempts}/{max_retries})... "
-                              f"Time remaining: {remaining_time}s")
-            
+            remaining_time = sum(1 * (2**i) for i in range(retry_attempts, max_retries))
+            print(
+                f" - Network error: {network_error}. Retrying ({retry_attempts}/{max_retries})... "
+                f"Time remaining: {remaining_time}s"
+            )
+            EL.logger.warning(
+                f"Network error: {network_error}. Retrying ({retry_attempts}/{max_retries})... "
+                f"Time remaining: {remaining_time}s"
+            )
+
             time.sleep(retry_delay)  # Wait before retrying
             retry_delay *= 2  # Apply exponential backoff for retries
 
@@ -125,6 +291,7 @@ def make_trakt_request(url, headers=None, params=None, payload=None, max_retries
     print(f" - {error_message}")
     EL.logger.error(error_message)
     return None
+
 
 def get_trakt_message(status_code):
     error_messages = {
@@ -149,9 +316,10 @@ def get_trakt_message(status_code):
         504: "Service Unavailable - server overloaded (try again in 30s)",
         520: "Service Unavailable - Cloudflare error",
         521: "Service Unavailable - Cloudflare error",
-        522: "Service Unavailable - Cloudflare error"
+        522: "Service Unavailable - Cloudflare error",
     }
     return error_messages.get(status_code, "Unknown error")
+
 
 def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_time=5):
     total_time_spent = 0  # Track total elapsed time
@@ -160,7 +328,7 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
     while total_time_spent < total_wait_time:
         try:
             start_time = time.time()  # Track time taken for each retry attempt
-            
+
             # Temporary solution to Chromium bug: Restart tab logic. See: https://issues.chromium.org/issues/386887881
             # Open a new tab and close any extras from previous iterations
             driver.execute_script("window.open();")
@@ -177,21 +345,25 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
             driver.get(url)
 
             # Wait until the status code becomes available
-            wait.until(lambda driver: driver.execute_script(
-                "return window.performance.getEntries().length > 0 && window.performance.getEntries()[0].responseStatus !== undefined"
-            ))
+            wait.until(
+                lambda driver: driver.execute_script(
+                    "return window.performance.getEntries().length > 0 && window.performance.getEntries()[0].responseStatus !== undefined"
+                )
+            )
 
             # Get the HTTP status code of the page using JavaScript
             status_code = driver.execute_script(
                 "return window.performance.getEntries()[0].responseStatus;"
             )
-            
+
             # Update resolved_url with the current URL after potential redirects
             resolved_url = driver.current_url
-            
+
             # Handle status codes
             if status_code is None or status_code == 0:
-                print(f"   - Unable to determine page load status. Status code returned 0 or None. Retrying...")
+                print(
+                    f"   - Unable to determine page load status. Status code returned 0 or None. Retrying..."
+                )
                 elapsed_time = time.time() - start_time  # Time taken for this attempt
                 total_time_spent += elapsed_time
 
@@ -200,15 +372,21 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
                     return False, None, url, driver, wait
 
                 remaining_time = total_wait_time - total_time_spent
-                print(f"   - Remaining time for retries: {int(remaining_time)} seconds.")
+                print(
+                    f"   - Remaining time for retries: {int(remaining_time)} seconds."
+                )
                 time.sleep(min(remaining_time, initial_wait_time))
                 continue
-                        
+
             elif status_code in [408, 425, 429, 500, 502, 503, 504]:
-                raise PageLoadException(f"Retryable HTTP error encountered: {status_code}")
-            
+                raise PageLoadException(
+                    f"Retryable HTTP error encountered: {status_code}"
+                )
+
             elif status_code >= 400:
-                print(f"   - Non-retryable error encountered. Status code: {status_code} Aborting.")
+                print(
+                    f"   - Non-retryable error encountered. Status code: {status_code} Aborting."
+                )
                 return False, status_code, url, driver, wait
 
             else:
@@ -219,7 +397,9 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
             frame = inspect.currentframe()
             lineno = frame.f_lineno
             filename = os.path.basename(inspect.getfile(frame))
-            print(f"   - TimeoutException: {str(e).splitlines()[0]} URL: {url} (File: {filename}, Line: {lineno})")
+            print(
+                f"   - TimeoutException: {str(e).splitlines()[0]} URL: {url} (File: {filename}, Line: {lineno})"
+            )
 
             elapsed_time = time.time() - start_time
             total_time_spent += elapsed_time
@@ -237,7 +417,9 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
             frame = inspect.currentframe()
             lineno = frame.f_lineno
             filename = os.path.basename(inspect.getfile(frame))
-            print(f"   - Selenium WebDriver Error: {str(e).splitlines()[0]} URL: {url} (File: {filename}, Line: {lineno})")
+            print(
+                f"   - Selenium WebDriver Error: {str(e).splitlines()[0]} URL: {url} (File: {filename}, Line: {lineno})"
+            )
 
             retryable_errors = [
                 "net::ERR_NAME_NOT_RESOLVED",
@@ -250,7 +432,7 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
                 "net::ERR_SSL_PROTOCOL_ERROR",
                 "net::ERR_CERT_COMMON_NAME_INVALID",
                 "net::ERR_CERT_DATE_INVALID",
-                "net::ERR_NETWORK_CHANGED"
+                "net::ERR_NETWORK_CHANGED",
             ]
 
             if any(error in str(e) for error in retryable_errors):
@@ -258,11 +440,15 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
                 total_time_spent += elapsed_time
 
                 if total_time_spent >= total_wait_time:
-                    print("   - Total wait time exceeded. Aborting after WebDriver error.")
+                    print(
+                        "   - Total wait time exceeded. Aborting after WebDriver error."
+                    )
                     return False, None, url, driver, wait
 
                 remaining_time = total_wait_time - total_time_spent
-                print(f"   - Retryable network error detected. Retrying... Time Remaining: {int(remaining_time)}s")
+                print(
+                    f"   - Retryable network error detected. Retrying... Time Remaining: {int(remaining_time)}s"
+                )
                 time.sleep(min(remaining_time, initial_wait_time))
                 continue
 
@@ -274,24 +460,40 @@ def get_page_with_retries(url, driver, wait, total_wait_time=180, initial_wait_t
             frame = inspect.currentframe()
             lineno = frame.f_lineno
             filename = os.path.basename(inspect.getfile(frame))
-            print(f"   - PageLoadException: {str(e).splitlines()[0]} URL: {url} (File: {filename}, Line: {lineno})")
+            print(
+                f"   - PageLoadException: {str(e).splitlines()[0]} URL: {url} (File: {filename}, Line: {lineno})"
+            )
 
             elapsed_time = time.time() - start_time
             total_time_spent += elapsed_time
 
             if total_time_spent >= total_wait_time:
-                print("   - Total wait time exceeded. Aborting after page load exception.")
+                print(
+                    "   - Total wait time exceeded. Aborting after page load exception."
+                )
                 return False, None, url, driver, wait
 
             remaining_time = total_wait_time - total_time_spent
-            print(f"   - Retryable error detected. Retrying... Time Remaining: {int(remaining_time)}s")
+            print(
+                f"   - Retryable error detected. Retrying... Time Remaining: {int(remaining_time)}s"
+            )
             time.sleep(min(remaining_time, initial_wait_time))
             continue
 
     print("   - All retries failed. Unable to load page.")
     return False, status_code, url, driver, wait
-    
-def make_request_with_retries(url, method="GET", headers=None, params=None, payload=None, max_retries=5, timeout=(30, 300), stream=False):
+
+
+def make_request_with_retries(
+    url,
+    method="GET",
+    headers=None,
+    params=None,
+    payload=None,
+    max_retries=5,
+    timeout=(30, 300),
+    stream=False,
+):
     """
     Make an HTTP request with retry logic for handling server and connection errors.
 
@@ -316,9 +518,13 @@ def make_request_with_retries(url, method="GET", headers=None, params=None, payl
         try:
             # Make the HTTP request based on the method
             if method.upper() == "GET":
-                response = requests.get(url, headers=headers, params=params, timeout=timeout, stream=stream)
+                response = requests.get(
+                    url, headers=headers, params=params, timeout=timeout, stream=stream
+                )
             elif method.upper() == "POST":
-                response = requests.post(url, headers=headers, json=payload, timeout=timeout, stream=stream)
+                response = requests.post(
+                    url, headers=headers, json=payload, timeout=timeout, stream=stream
+                )
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
 
@@ -332,26 +538,40 @@ def make_request_with_retries(url, method="GET", headers=None, params=None, payl
 
                 if retry_after:
                     try:
-                        retry_after = int(retry_after)  # If it's a number, use it as seconds
+                        retry_after = int(
+                            retry_after
+                        )  # If it's a number, use it as seconds
                     except ValueError:
                         retry_after = retry_delay  # If it's not a number, default back to exponential delay
                 else:
                     retry_after = retry_delay  # Default exponential backoff if no header is provided
-                
-                print(f"Server error {response.status_code}. Retrying in {retry_after} seconds...")
+
+                print(
+                    f"Server error {response.status_code}. Retrying in {retry_after} seconds..."
+                )
                 time.sleep(retry_after)  # Wait before retrying
-                
+
                 retry_delay *= 2  # Exponential backoff
                 retry_attempts += 1
             else:
                 # Non-retryable errors
-                print(f"Request failed with status code {response.status_code}: {response.text}")
+                print(
+                    f"Request failed with status code {response.status_code}: {response.text}"
+                )
                 return None
 
-        except (ConnectionError, Timeout, TooManyRedirects, SSLError, ProxyError) as network_err:
+        except (
+            ConnectionError,
+            Timeout,
+            TooManyRedirects,
+            SSLError,
+            ProxyError,
+        ) as network_err:
             # Handle network-related errors
             retry_attempts += 1
-            print(f"Network error: {network_err}. Retrying in {retry_delay} seconds... (Attempt {retry_attempts}/{max_retries})")
+            print(
+                f"Network error: {network_err}. Retrying in {retry_delay} seconds... (Attempt {retry_attempts}/{max_retries})"
+            )
             time.sleep(retry_delay)  # Wait before retrying
             retry_delay *= 2  # Exponential backoff
 
@@ -363,13 +583,16 @@ def make_request_with_retries(url, method="GET", headers=None, params=None, payl
     # If retries are exhausted, log the failure
     print(f"Max retries reached. Request to {url} failed.")
     return None
-    
+
+
 # Function to clean a title by removing non-alphanumeric characters
 def clean_title(title):
-    return re.sub(r'[^a-zA-Z0-9. ]', '', title).lower()
-    
+    return re.sub(r"[^a-zA-Z0-9. ]", "", title).lower()
+
+
 # Global cache for resolved IMDB IDs - persists across all update_outdated_imdb_ids_from_trakt calls
 _imdb_id_resolution_cache = {}
+
 
 # Function to resolve IMDB_ID redirection using lightweight HEAD request first, then driver fallback
 def resolve_imdb_id_fast(imdb_id, driver, wait):
@@ -378,47 +601,59 @@ def resolve_imdb_id_fast(imdb_id, driver, wait):
     Results are cached globally to avoid re-resolving the same ID.
     """
     global _imdb_id_resolution_cache
-    
+
     # Check cache first
     if imdb_id in _imdb_id_resolution_cache:
         return _imdb_id_resolution_cache[imdb_id], driver, wait
-    
+
     resolved_id = imdb_id  # Default to same if resolution fails
     url = f"https://www.imdb.com/title/{imdb_id}/"
-    
+
     try:
         # Try lightweight HEAD request first (no page render, much faster)
         try:
-            response = requests.head(url, allow_redirects=True, timeout=10,
-                                     headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'})
+            response = requests.head(
+                url,
+                allow_redirects=True,
+                timeout=10,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+                },
+            )
             if response.status_code == 200:
                 final_url = response.url
-                if '/title/' in final_url:
-                    resolved_id = final_url.split('/title/')[1].split('/')[0]
+                if "/title/" in final_url:
+                    resolved_id = final_url.split("/title/")[1].split("/")[0]
         except (requests.RequestException, Exception):
             # HEAD request failed, fall back to full driver page load
             try:
-                success, status_code, resolved_url, driver, wait = get_page_with_retries(url, driver, wait, total_wait_time=30)
-                if success and '/title/' in resolved_url:
-                    resolved_id = resolved_url.split('/title/')[1].split('/')[0]
+                success, status_code, resolved_url, driver, wait = (
+                    get_page_with_retries(url, driver, wait, total_wait_time=30)
+                )
+                if success and "/title/" in resolved_url:
+                    resolved_id = resolved_url.split("/title/")[1].split("/")[0]
             except Exception:
                 pass  # Keep original ID
     except Exception:
         pass  # Keep original ID
-    
+
     # Cache the result
     _imdb_id_resolution_cache[imdb_id] = resolved_id
     return resolved_id, driver, wait
 
+
 # Function to resolve IMDB_ID redirection using the driver (legacy, kept for compatibility)
 def resolve_imdb_id_with_driver(imdb_id, driver, wait):
     return resolve_imdb_id_fast(imdb_id, driver, wait)
-    
+
+
 # Function to resolve and update outdated IMDB_IDs from the trakt list based on matching Title and Type comparison
-def update_outdated_imdb_ids_from_trakt(trakt_list, imdb_list, driver, wait, list_name="items", show_progress=True):
+def update_outdated_imdb_ids_from_trakt(
+    trakt_list, imdb_list, driver, wait, list_name="items", show_progress=True
+):
     """
     Resolve conflicting IMDB IDs between Trakt and IMDB lists using fast HEAD requests.
-    
+
     Args:
         trakt_list: List of items from Trakt
         imdb_list: List of items from IMDB
@@ -426,117 +661,139 @@ def update_outdated_imdb_ids_from_trakt(trakt_list, imdb_list, driver, wait, lis
         wait: Selenium WebDriverWait instance
         list_name: Name of the list for progress display
         show_progress: Whether to show progress updates
-    
+
     Returns:
         tuple: (updated_trakt_list, imdb_list, driver, wait)
     """
-    comparison_keys = ['Title', 'Type', 'IMDB_ID']
+    comparison_keys = ["Title", "Type", "IMDB_ID"]
 
     # Group items by (Title, Type), cleaning the Title
     trakt_grouped = {}
     for item in trakt_list:
         if all(key in item for key in comparison_keys):
-            cleaned_title = clean_title(item['Title'])
-            key = (cleaned_title, item['Type'])
-            trakt_grouped.setdefault(key, set()).add(item['IMDB_ID'])
+            cleaned_title = clean_title(item["Title"])
+            key = (cleaned_title, item["Type"])
+            trakt_grouped.setdefault(key, set()).add(item["IMDB_ID"])
 
     imdb_grouped = {}
     for item in imdb_list:
         if all(key in item for key in comparison_keys):
-            cleaned_title = clean_title(item['Title'])
-            key = (cleaned_title, item['Type'])
-            imdb_grouped.setdefault(key, set()).add(item['IMDB_ID'])
+            cleaned_title = clean_title(item["Title"])
+            key = (cleaned_title, item["Type"])
+            imdb_grouped.setdefault(key, set()).add(item["IMDB_ID"])
 
     # Find conflicting items based on Title and Type where IMDB_IDs are different
     conflicting_items = {
-        key for key in trakt_grouped.keys() & imdb_grouped.keys()
+        key
+        for key in trakt_grouped.keys() & imdb_grouped.keys()
         if trakt_grouped[key] != imdb_grouped[key]
     }
-    
+
     # Collect all IDs that need resolution
     ids_to_resolve = set()
     for key in conflicting_items:
         ids_to_resolve.update(trakt_grouped[key])
-    
+
     total_conflicts = len(ids_to_resolve)
-    
+
     if total_conflicts > 0 and show_progress:
-        print(f"      Resolving {total_conflicts} conflicting {list_name} IDs...", flush=True)
-    
+        print(
+            f"      Resolving {total_conflicts} conflicting {list_name} IDs...",
+            flush=True,
+        )
+
     # Resolve all conflicting IDs with progress tracking
     resolved_count = 0
     cache_hits = 0
-    
+
     for key in conflicting_items:
         trakt_ids = trakt_grouped[key]
 
         for trakt_id in trakt_ids:
             # Check if already cached (fast path)
             was_cached = trakt_id in _imdb_id_resolution_cache
-            
+
             resolved_id, driver, wait = resolve_imdb_id_fast(trakt_id, driver, wait)
-            
+
             if was_cached:
                 cache_hits += 1
             else:
                 resolved_count += 1
                 # Show progress every 5 resolutions
                 if show_progress and resolved_count % 5 == 0:
-                    print(f"\r      Resolved {resolved_count}/{total_conflicts} IDs (cache hits: {cache_hits})...", end='', flush=True)
+                    print(
+                        f"\r      Resolved {resolved_count}/{total_conflicts} IDs (cache hits: {cache_hits})...",
+                        end="",
+                        flush=True,
+                    )
 
             # Update IMDB_ID in the original trakt_list
             if resolved_id != trakt_id:
                 for item in trakt_list:
-                    if item.get('IMDB_ID') == trakt_id:
-                        item['IMDB_ID'] = resolved_id
-    
+                    if item.get("IMDB_ID") == trakt_id:
+                        item["IMDB_ID"] = resolved_id
+
     if total_conflicts > 0 and show_progress:
-        print(f"\r      ✓ Resolved {total_conflicts} {list_name} IDs (cache hits: {cache_hits})          ", flush=True)
+        print(
+            f"\r      OK Resolved {total_conflicts} {list_name} IDs (cache hits: {cache_hits})          ",
+            flush=True,
+        )
 
     return trakt_list, imdb_list, driver, wait
+
 
 def clear_imdb_id_cache():
     """Clear the global IMDB ID resolution cache."""
     global _imdb_id_resolution_cache
     _imdb_id_resolution_cache = {}
-    
+
+
 # Function to filter out items that share the same Title, Year, and Type
 # AND have non-matching IMDB_ID values, using cleaned titles for comparison
 def filter_out_mismatched_items(trakt_list, IMDB_list):
     # Define the keys to be used for comparison
-    comparison_keys = ['Title', 'Year', 'Type', 'IMDB_ID']
+    comparison_keys = ["Title", "Year", "Type", "IMDB_ID"]
 
     # Group items by (Title, Year, Type), cleaning the Title for comparison
     trakt_grouped = {}
     for item in trakt_list:
         if all(key in item for key in comparison_keys):
-            cleaned_title = clean_title(item['Title'])  # Clean the Title for comparison
-            key = (cleaned_title, item['Year'], item['Type'])
-            trakt_grouped.setdefault(key, set()).add(item['IMDB_ID'])
+            cleaned_title = clean_title(item["Title"])  # Clean the Title for comparison
+            key = (cleaned_title, item["Year"], item["Type"])
+            trakt_grouped.setdefault(key, set()).add(item["IMDB_ID"])
 
     IMDB_grouped = {}
     for item in IMDB_list:
         if all(key in item for key in comparison_keys):
-            cleaned_title = clean_title(item['Title'])  # Clean the Title for comparison
-            key = (cleaned_title, item['Year'], item['Type'])
-            IMDB_grouped.setdefault(key, set()).add(item['IMDB_ID'])
+            cleaned_title = clean_title(item["Title"])  # Clean the Title for comparison
+            key = (cleaned_title, item["Year"], item["Type"])
+            IMDB_grouped.setdefault(key, set()).add(item["IMDB_ID"])
 
     # Find conflicting items (same Title, Year, Type but different IMDB_IDs)
     conflicting_items = {
-        key for key in trakt_grouped.keys() & IMDB_grouped.keys()  # Only consider shared keys
+        key
+        for key in trakt_grouped.keys()
+        & IMDB_grouped.keys()  # Only consider shared keys
         if trakt_grouped[key] != IMDB_grouped[key]  # Check if IMDB_IDs differ
     }
 
     # Filter out conflicting items from both lists
     filtered_trakt_list = [
-        item for item in trakt_list if (clean_title(item['Title']), item['Year'], item['Type']) not in conflicting_items
+        item
+        for item in trakt_list
+        if (clean_title(item["Title"]), item["Year"], item["Type"])
+        not in conflicting_items
     ]
     filtered_IMDB_list = [
-        item for item in IMDB_list if (clean_title(item['Title']), item['Year'], item['Type']) not in conflicting_items
+        item
+        for item in IMDB_list
+        if (clean_title(item["Title"]), item["Year"], item["Type"])
+        not in conflicting_items
     ]
 
     return filtered_trakt_list, filtered_IMDB_list
-    
+
+
 def filter_items(source_list, target_list, key="IMDB_ID"):
     """
     Filters items from the target_list that are not already present in the source_list based on a key.
@@ -551,20 +808,21 @@ def filter_items(source_list, target_list, key="IMDB_ID"):
     """
     source_set = {item[key] for item in source_list}
     return [item for item in target_list if item[key] not in source_set]
-    
+
+
 def remove_unknown_types(list_a, list_b):
     """
     Remove items with unknown or invalid 'Type' from two lists.
-    
+
     Rules:
     - Keep only items where Type is 'movie', 'show', or 'episode'.
-    - If one list has None/invalid type but the other has a valid type 
+    - If one list has None/invalid type but the other has a valid type
       for the same IMDB_ID, assume the valid type applies to both.
-    
+
     Args:
         list_a (list): First list of dicts (e.g. trakt_reviews, imdb_reviews).
         list_b (list): Second list of dicts (e.g. trakt_ratings, imdb_ratings).
-    
+
     Returns:
         tuple: (cleaned_list_a, cleaned_list_b)
     """
@@ -595,62 +853,76 @@ def remove_unknown_types(list_a, list_b):
         return filtered
 
     return filter_list_items(list_a), filter_list_items(list_b)
-    
-def remove_combined_watchlist_to_remove_items_from_watchlist_to_set_lists_by_imdb_id(combined_watchlist_to_remove, imdb_watchlist_to_set, trakt_watchlist_to_set):
+
+
+def remove_combined_watchlist_to_remove_items_from_watchlist_to_set_lists_by_imdb_id(
+    combined_watchlist_to_remove, imdb_watchlist_to_set, trakt_watchlist_to_set
+):
     # Extract IMDB_IDs from the items to remove
-    imdb_ids_to_remove = {item['IMDB_ID'] for item in combined_watchlist_to_remove}
+    imdb_ids_to_remove = {item["IMDB_ID"] for item in combined_watchlist_to_remove}
 
     # Filter imdb_watchlist_to_set, keeping items not in imdb_ids_to_remove
     imdb_watchlist_to_set = [
-        item for item in imdb_watchlist_to_set if item['IMDB_ID'] not in imdb_ids_to_remove
+        item
+        for item in imdb_watchlist_to_set
+        if item["IMDB_ID"] not in imdb_ids_to_remove
     ]
 
     # Filter trakt_watchlist_to_set, keeping items not in imdb_ids_to_remove
     trakt_watchlist_to_set = [
-        item for item in trakt_watchlist_to_set if item['IMDB_ID'] not in imdb_ids_to_remove
+        item
+        for item in trakt_watchlist_to_set
+        if item["IMDB_ID"] not in imdb_ids_to_remove
     ]
 
     return imdb_watchlist_to_set, trakt_watchlist_to_set
-    
+
+
 # Function to remove duplicates based on IMDB_ID, keeping the older one based on Date_Added
 def remove_duplicates_by_imdb_id(watched_content):
     seen = {}
     for item in watched_content:
-        imdb_id = item['IMDB_ID']
-        date_added = item.get('Date_Added')
+        imdb_id = item["IMDB_ID"]
+        date_added = item.get("Date_Added")
 
         if date_added:
-            date_added = datetime.strptime(date_added, '%Y-%m-%dT%H:%M:%S.000Z')
-        
+            date_added = datetime.strptime(date_added, "%Y-%m-%dT%H:%M:%S.000Z")
+
         if imdb_id not in seen:
             seen[imdb_id] = item
         else:
-            existing_date = seen[imdb_id].get('Date_Added')
+            existing_date = seen[imdb_id].get("Date_Added")
             if existing_date:
-                existing_date = datetime.strptime(existing_date, '%Y-%m-%dT%H:%M:%S.000Z')
+                existing_date = datetime.strptime(
+                    existing_date, "%Y-%m-%dT%H:%M:%S.000Z"
+                )
                 if date_added and date_added < existing_date:
                     seen[imdb_id] = item
             elif not date_added:
                 continue  # Keep the first one encountered when no Date_Added is available
 
     return list(seen.values())
-    
+
+
 # Function to remove items with Type 'show'
 def remove_shows(watched_content):
     filtered_content = []
     for item in watched_content:
-        if item['Type'] != 'show':
+        if item["Type"] != "show":
             filtered_content.append(item)
     return filtered_content
+
 
 # Filter out setting review IMDB where the comment length is less than 600 characters
 def filter_by_comment_length(lst, min_comment_length=None):
     result = []
     for item in lst:
-        if min_comment_length is None or ('Comment' in item and len(item['Comment']) >= min_comment_length):
+        if min_comment_length is None or (
+            "Comment" in item and len(item["Comment"]) >= min_comment_length
+        ):
             result.append(item)
     return result
-    
+
 
 def sort_by_date_added(items, descending=False):
     """
@@ -663,8 +935,9 @@ def sort_by_date_added(items, descending=False):
     Returns:
         list: A sorted list of items by the 'Date_Added' field.
     """
+
     def parse_date(item):
-        date_str = item.get('Date_Added')  # Safely get the Date_Added field
+        date_str = item.get("Date_Added")  # Safely get the Date_Added field
         if date_str:
             try:
                 return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -673,7 +946,8 @@ def sort_by_date_added(items, descending=False):
         return datetime.min  # Use the earliest date as a fallback
 
     return sorted(items, key=parse_date, reverse=descending)
-    
+
+
 def get_items_older_than_x_days(items, days):
     """
     Returns items older than a specified number of days based on the 'Date_Added' field.
@@ -685,8 +959,9 @@ def get_items_older_than_x_days(items, days):
     Returns:
         list: A filtered list of items where 'Date_Added' is older than the specified number of days.
     """
+
     def is_older(item):
-        date_str = item.get('Date_Added')  # Safely get the Date_Added field
+        date_str = item.get("Date_Added")  # Safely get the Date_Added field
         if date_str:
             try:
                 date_added = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -697,21 +972,22 @@ def get_items_older_than_x_days(items, days):
         return False  # Exclude items with invalid or missing dates
 
     return [item for item in items if is_older(item)]
-    
+
+
 def check_if_watch_history_limit_reached(size):
     """
     Checks if the watch history has 10,000 or more items.
     If true, updates the sync_watch_history in credentials.txt to False
     and marks the watch history limit as reached.
-    
+
     Args:
         size (int): Size of the user's watch history.
-    
+
     Returns:
         bool: True if the watch history limit has been reached, False otherwise.
     """
-    
-    '''
+
+    """
     # Define the file path for credentials.txt
     here = os.path.abspath(os.path.dirname(__file__))
     file_path = os.path.join(here, 'credentials.txt')
@@ -724,18 +1000,20 @@ def check_if_watch_history_limit_reached(size):
     except FileNotFoundError:
         print("Credentials file not found. A new file will be created if needed.", exc_info=True)
         return False  # Return False if the file doesn't exist
-    '''
+    """
 
     # Check if list has 10,000 or more items
     if size >= 9999:
-        '''
+        """
         # Update sync_watch_history to False
         credentials['sync_watch_history'] = False
-        '''
-        print("WARNING: IMDB watch history has reached the 10,000 limit. New watch history items will be not added to IMDB.")
+        """
+        print(
+            "WARNING: IMDB watch history has reached the 10,000 limit. New watch history items will be not added to IMDB."
+        )
         return True  # Return True indicating limit reached and updated the credentials
-        
-        '''
+
+        """
         # Mark that the watch history limit has been reached
         try:
             with open(file_path, 'w', encoding='utf-8') as file:
@@ -745,47 +1023,55 @@ def check_if_watch_history_limit_reached(size):
         except Exception as e:
             print("Failed to write to credentials file.", exc_info=True)
             return False  # Return False if there was an error while updating the file
-        '''
+        """
 
     # Return False if the limit hasn't been reached
     return False
-    
+
+
 def check_if_watchlist_limit_reached(size):
     """
     Checks if the watchlist is 10,000 or more items.
     If true, updates the sync_watchlist in credentials.txt to False
     and marks the watchlist limit as reached.
-    
+
     Args:
         size (int): Size of the user's watchlist.
-    
+
     Returns:
         bool: True if the watchlist limit has been reached, False otherwise.
     """
     # Define the file path for credentials.txt
     here = os.path.abspath(os.path.dirname(__file__))
-    file_path = os.path.join(here, 'credentials.txt')
-    
+    file_path = os.path.join(here, "credentials.txt")
+
     # Load the credentials file
     credentials = {}
     try:
-        with open(file_path, 'r', encoding='utf-8') as file:
+        with open(file_path, "r", encoding="utf-8") as file:
             credentials = json.load(file)
     except FileNotFoundError:
-        print("Credentials file not found. A new file will be created if needed.", exc_info=True)
+        print(
+            "Credentials file not found. A new file will be created if needed.",
+            exc_info=True,
+        )
         return False  # Return False if the file doesn't exist
 
     # Check if list has 10,000 or more items
     if size >= 9999:
         # Update sync_watchlist to False
-        credentials['sync_watchlist'] = False
-        
+        credentials["sync_watchlist"] = False
+
         # Mark that the watchlist limit has been reached
         try:
-            with open(file_path, 'w', encoding='utf-8') as file:
-                json.dump(credentials, file, indent=4, separators=(', ', ': '))
-            print("IMDB watchlist has reached the 10,000 item limit. sync_watchlist value set to False. Watchlist will no longer be synced.")
-            return True  # Return True indicating limit reached and updated the credentials
+            with open(file_path, "w", encoding="utf-8") as file:
+                json.dump(credentials, file, indent=4, separators=(", ", ": "))
+            print(
+                "IMDB watchlist has reached the 10,000 item limit. sync_watchlist value set to False. Watchlist will no longer be synced."
+            )
+            return (
+                True  # Return True indicating limit reached and updated the credentials
+            )
         except Exception as e:
             print("Failed to write to credentials file.", exc_info=True)
             return False  # Return False if there was an error while updating the file
