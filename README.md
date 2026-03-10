@@ -12,10 +12,6 @@ This repository is a maintained fork focused on reliability, clearer setup, safe
 
 If you searched for `Trakt IMDb sync`, `IMDb Trakt watchlist sync`, `Trakt ratings sync`, or `IMDb watch history to Trakt`, this is the tool built for that job.
 
-## Demo
-
-![IMDB-Trakt-Syncer demo](https://i.imgur.com/QXCtGrr.png)
-
 ## Quick start
 
 Install:
